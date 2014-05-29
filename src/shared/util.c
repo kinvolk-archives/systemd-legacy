@@ -5691,14 +5691,17 @@ static int search_and_fopen_internal(const char *path, const char *mode, const c
         assert(mode);
         assert(_f);
 
-        if (!path_strv_canonicalize_absolute_uniq(search, root))
+        if (!path_strv_cleanup_uniq(search, root))
                 return -ENOMEM;
 
         STRV_FOREACH(i, search) {
                 _cleanup_free_ char *p = NULL;
                 FILE *f;
 
-                p = strjoin(*i, "/", path, NULL);
+                if (root)
+                        p = strjoin(root, *i, "/", path, NULL);
+                else
+                        p = strjoin(*i, "/", path, NULL);
                 if (!p)
                         return -ENOMEM;
 

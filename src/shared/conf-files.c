@@ -37,10 +37,18 @@
 #include "hashmap.h"
 #include "conf-files.h"
 
-static int files_add(Hashmap *h, const char *dirpath, const char *suffix) {
+static int files_add(Hashmap *h, const char *dirpath, const char *suffix, const char *root) {
         _cleanup_closedir_ DIR *dir = NULL;
+        _cleanup_free_ char *fullpath = NULL;
 
-        dir = opendir(dirpath);
+        if (root)
+                fullpath = strappend(root, dirpath);
+        else
+                fullpath = strdup(dirpath);
+        if (!fullpath)
+                return -ENOMEM;
+
+        dir = opendir(fullpath);
         if (!dir) {
                 if (errno == ENOENT)
                         return 0;
@@ -63,7 +71,7 @@ static int files_add(Hashmap *h, const char *dirpath, const char *suffix) {
                 if (!dirent_is_file_with_suffix(de, suffix))
                         continue;
 
-                p = strjoin(dirpath, "/", de->d_name, NULL);
+                p = strjoin(fullpath, "/", de->d_name, NULL);
                 if (!p)
                         return -ENOMEM;
 
@@ -100,7 +108,7 @@ static int conf_files_list_strv_internal(char ***strv, const char *suffix, const
         assert(suffix);
 
         /* This alters the dirs string array */
-        if (!path_strv_canonicalize_absolute_uniq(dirs, root))
+        if (!path_strv_cleanup_uniq(dirs, root))
                 return -ENOMEM;
 
         fh = hashmap_new(string_hash_func, string_compare_func);
@@ -108,7 +116,7 @@ static int conf_files_list_strv_internal(char ***strv, const char *suffix, const
                 return -ENOMEM;
 
         STRV_FOREACH(p, dirs) {
-                r = files_add(fh, *p, suffix);
+                r = files_add(fh, *p, suffix, root);
                 if (r == -ENOMEM) {
                         hashmap_free_free(fh);
                         return r;
