@@ -83,6 +83,9 @@ int sd_network_get_dhcp_lease(unsigned index, sd_dhcp_lease **ret);
 /* Returns true if link is configured to respect DNS entries received by DHCP */
 int sd_network_dhcp_use_dns(unsigned index);
 
+/* Returns true if link is configured to use the domain name received by DHCP */
+int sd_network_dhcp_use_domainname(int ifindex);
+
 /* Returns true if link is configured to respect NTP entries received by DHCP */
 int sd_network_dhcp_use_ntp(unsigned index);
 

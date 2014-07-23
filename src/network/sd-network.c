@@ -246,6 +246,10 @@ _public_ int sd_network_dhcp_use_dns(unsigned index) {
         return network_get_boolean("DHCP_USE_DNS", index);
 }
 
+_public_ int sd_network_dhcp_use_domainname(int ifindex) {
+        return network_get_boolean("DHCP_USE_DOMAINNAME", ifindex);
+}
+
 _public_ int sd_network_dhcp_use_ntp(unsigned index) {
         return network_get_boolean("DHCP_USE_NTP", index);
 }

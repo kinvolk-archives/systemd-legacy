@@ -195,6 +195,7 @@ int manager_update_resolv_conf(Manager *m) {
         _cleanup_free_ char *temp_path = NULL;
         _cleanup_fclose_ FILE *f = NULL;
          _cleanup_free_ unsigned *indices = NULL;
+        const char *domainname = NULL;
         Address *address;
         unsigned count = 0;
         int n, r, i;
@@ -222,6 +223,18 @@ int manager_update_resolv_conf(Manager *m) {
                 struct in_addr *nameservers;
                 struct in6_addr *nameservers6;
                 size_t nameservers_size;
+
+                if (!domainname) {
+                        r = sd_network_dhcp_use_domainname(indices[i]);
+                        if (r > 0) {
+                                r = sd_network_get_dhcp_lease(indices[i], &lease);
+                                if (r >= 0) {
+                                        r = sd_dhcp_lease_get_domainname(lease, &domainname);
+                                        if (r >= 0)
+                                                fprintf(f, "domain %s\n", domainname);
+                                }
+                        }
+                }
 
                 r = sd_network_dhcp_use_dns(indices[i]);
                 if (r > 0) {

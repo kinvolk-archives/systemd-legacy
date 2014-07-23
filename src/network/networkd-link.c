@@ -2517,9 +2517,11 @@ int link_save(Link *link) {
                 fprintf(f,
                         "DHCP_LEASE=%s\n"
                         "DHCP_USE_DNS=%s\n"
+                        "DHCP_USE_DOMAINNAME=%s\n"
                         "DHCP_USE_NTP=%s\n",
                         link->lease_file,
                         yes_no(link->network->dhcp_dns),
+                        yes_no(link->network->dhcp_domainname),
                         yes_no(link->network->dhcp_ntp));
         } else
                 unlink(link->lease_file);
