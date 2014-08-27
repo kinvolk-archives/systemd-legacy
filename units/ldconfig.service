@@ -12,7 +12,6 @@ DefaultDependencies=no
 Conflicts=shutdown.target
 After=systemd-readahead-collect.service systemd-readahead-replay.service systemd-remount-fs.service systemd-tmpfiles-setup.service
 Before=sysinit.target shutdown.target systemd-update-done.service
-ConditionNeedsUpdate=/etc
 
 [Service]
 Type=oneshot
