@@ -75,13 +75,13 @@ bool manager_all_configured(Manager *m) {
                 if (!l->state) {
                         log_debug("link %s has not yet been processed by udev",
                                   l->ifname);
-                        return false;
+                        continue;
                 }
 
                 if (streq(l->state, "configuring")) {
                         log_debug("link %s is being processed by networkd",
                                   l->ifname);
-                        return false;
+                        continue;
                 }
 
                 if (l->operational_state &&
