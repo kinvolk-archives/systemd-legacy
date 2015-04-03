@@ -502,7 +502,7 @@ int dhcp_lease_parse_options(uint8_t code, uint8_t len, const uint8_t *option,
                 if (r < 0)
                         return r;
 
-                if (!domainname_is_valid(domainname) || is_localhost(domainname))
+                if (!hostname_is_valid(domainname) || is_localhost(domainname))
                         break;
 
                 free(lease->domainname);

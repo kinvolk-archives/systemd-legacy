@@ -4176,7 +4176,7 @@ static bool hostname_valid_char(char c) {
                 c == '.';
 }
 
-bool domainname_is_valid(const char *s) {
+bool hostname_is_valid(const char *s) {
         const char *p;
         bool dot;
 
@@ -4197,17 +4197,10 @@ bool domainname_is_valid(const char *s) {
                 }
         }
 
+        if (dot)
+                return false;
+
         if (p-s > HOST_NAME_MAX)
-                return false;
-
-        return true;
-}
-
-bool hostname_is_valid(const char *s) {
-        if (!domainname_is_valid(s))
-                return false;
-
-        if (s[strlen(s)-1] == '.')
                 return false;
 
         return true;
