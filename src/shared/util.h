@@ -87,6 +87,9 @@
 #include "missing.h"
 #include "time-util.h"
 
+/* Maximum length of a domain name. See RFC 1035 */
+#define DOMAIN_NAME_MAX 255
+
 /* What is interpreted as whitespace? */
 #define WHITESPACE " \t\n\r"
 #define NEWLINE    "\n\r"

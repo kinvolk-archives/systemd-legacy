@@ -490,20 +490,6 @@ static void test_hostname_is_valid(void) {
         assert_se(!hostname_is_valid("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"));
 }
 
-static void test_domainname_is_valid(void) {
-        assert_se(domainname_is_valid("foobar"));
-        assert_se(domainname_is_valid("foobar."));
-        assert_se(domainname_is_valid("foobar.com"));
-        assert_se(domainname_is_valid("foobar.com."));
-        assert_se(!domainname_is_valid("fööbar"));
-        assert_se(!domainname_is_valid(""));
-        assert_se(!domainname_is_valid("."));
-        assert_se(!domainname_is_valid(".."));
-        assert_se(!domainname_is_valid(".foobar"));
-        assert_se(!domainname_is_valid("foo..bar"));
-        assert_se(!domainname_is_valid("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"));
-}
-
 static void test_u64log2(void) {
         assert_se(u64log2(0) == 0);
         assert_se(u64log2(8) == 3);

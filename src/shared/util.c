@@ -4176,7 +4176,10 @@ static bool hostname_valid_char(char c) {
                 c == '.';
 }
 
-bool domainname_is_valid(const char *s) {
+/* Doesn't accept empty hostnames, hostnames with trailing or
+ * leading dots, and hostnames with multiple dots in a
+ * sequence. Also ensures that the length stays below n */
+static bool hostname_is_valid_len(const char *s, size_t n) {
         const char *p;
         bool dot;
 
@@ -4197,20 +4200,22 @@ bool domainname_is_valid(const char *s) {
                 }
         }
 
-        if (p-s > HOST_NAME_MAX)
+        if (dot)
+                return false;
+
+        if (p-s > n)
                 return false;
 
         return true;
+
 }
 
 bool hostname_is_valid(const char *s) {
-        if (!domainname_is_valid(s))
-                return false;
+	return hostname_is_valid_len(s, HOST_NAME_MAX);
+}
 
-        if (s[strlen(s)-1] == '.')
-                return false;
-
-        return true;
+bool domainname_is_valid(const char *s) {
+	return hostname_is_valid_len(s, DOMAIN_NAME_MAX);
 }
 
 char* hostname_cleanup(char *s, bool lowercase) {
