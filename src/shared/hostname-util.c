@@ -61,7 +61,7 @@ static bool hostname_valid_char(char c) {
                 c == '.';
 }
 
-bool hostname_is_valid(const char *s) {
+static bool hostname_is_valid_len(const char *s, int len) {
         const char *p;
         bool dot;
 
@@ -90,10 +90,19 @@ bool hostname_is_valid(const char *s) {
         if (dot)
                 return false;
 
-        if (p-s > HOST_NAME_MAX)
+        if (p-s > len)
                 return false;
 
         return true;
+}
+
+bool hostname_is_valid(const char *s) {
+        return hostname_is_valid_len(s, HOST_NAME_MAX);
+}
+
+bool domainname_is_valid(const char *s) {
+        /* Maximum domain name size. */
+        return hostname_is_valid_len(s, DOMAIN_NAME_MAX);
 }
 
 char* hostname_cleanup(char *s, bool lowercase) {
