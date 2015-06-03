@@ -25,11 +25,15 @@
 
 #include "macro.h"
 
+/* Maximum length of a domain name. See RFC 1035 */
+#define DOMAIN_NAME_MAX 255
+
 bool hostname_is_set(void);
 
 char* gethostname_malloc(void);
 
 bool hostname_is_valid(const char *s) _pure_;
+bool domainname_is_valid(const char *s) _pure_;
 char* hostname_cleanup(char *s, bool lowercase);
 
 bool is_localhost(const char *hostname);
