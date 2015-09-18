@@ -472,6 +472,7 @@ dist_systemunit_DATA = \
 	units/getty.target \
 	units/halt.target \
 	units/kexec.target \
+	units/exit.target \
 	units/local-fs.target \
 	units/local-fs-pre.target \
 	units/initrd.target \
@@ -548,6 +549,7 @@ nodist_systemunit_DATA = \
 	units/systemd-poweroff.service \
 	units/systemd-reboot.service \
 	units/systemd-kexec.service \
+	units/systemd-exit.service \
 	units/systemd-fsck@.service \
 	units/systemd-fsck-root.service \
 	units/systemd-machine-id-commit.service \
@@ -599,6 +601,7 @@ EXTRA_DIST += \
 	units/systemd-poweroff.service.in \
 	units/systemd-reboot.service.in \
 	units/systemd-kexec.service.in \
+	units/systemd-exit.service.in \
 	units/user/systemd-exit.service.in \
 	units/systemd-fsck@.service.in \
 	units/systemd-fsck-root.service.in \
