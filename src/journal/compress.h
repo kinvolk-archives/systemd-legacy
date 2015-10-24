@@ -42,7 +42,7 @@ static inline int compress_blob(const void *src, uint64_t src_size, void *dst, s
         if (r == 0)
                 return OBJECT_COMPRESSED_XZ;
 #endif
-        return r;
+        return 0;
 }
 
 int decompress_blob_xz(const void *src, uint64_t src_size,
