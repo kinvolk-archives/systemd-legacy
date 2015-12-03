@@ -705,7 +705,7 @@ static int parse_argv(int argc, char *argv[]) {
                                 log_error("Invalid tmpfs specification: %s", optarg);
                                 return r;
                         }
-                        if (r)
+                        if (!isempty(current))
                                 opts = strdup(current);
                         else
                                 opts = strdup("mode=0755");
