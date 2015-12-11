@@ -34,6 +34,8 @@
 #include "macro.h"
 #include "mmap-cache.h"
 #include "hashmap.h"
+#include "sd-event.h"
+#include "sparse-endian.h"
 
 typedef struct JournalMetrics {
         uint64_t max_use;
@@ -98,6 +100,9 @@ typedef struct JournalFile {
 
         JournalMetrics metrics;
         MMapCache *mmap;
+
+        sd_event_source *post_change_timer;
+        usec_t post_change_timer_period;
 
         OrderedHashmap *chain_cache;
 
@@ -222,6 +227,7 @@ void journal_file_print_header(JournalFile *f);
 int journal_file_rotate(JournalFile **f, bool compress, bool seal);
 
 void journal_file_post_change(JournalFile *f);
+int journal_file_enable_post_change_timer(JournalFile *f, sd_event *e, usec_t t);
 
 void journal_default_metrics(JournalMetrics *m, int fd);
 

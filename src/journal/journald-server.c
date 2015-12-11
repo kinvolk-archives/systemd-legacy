@@ -68,6 +68,9 @@
 
 #define RECHECK_AVAILABLE_SPACE_USEC (30*USEC_PER_SEC)
 
+/* The period to insert between posting changes for coalescing */
+#define POST_CHANGE_TIMER_INTERVAL_USEC (250*USEC_PER_MSEC)
+
 static const char* const storage_table[_STORAGE_MAX] = {
         [STORAGE_AUTO] = "auto",
         [STORAGE_VOLATILE] = "volatile",
@@ -242,6 +245,38 @@ finish:
 #endif
 }
 
+static int open_journal(
+                Server *s,
+                bool reliably,
+                const char *fname,
+                int flags,
+                bool seal,
+                JournalMetrics *metrics,
+                JournalFile *template,
+                JournalFile **ret) {
+        int r;
+
+        assert(s);
+        assert(fname);
+        assert(ret);
+
+        if (reliably)
+                r = journal_file_open_reliably(fname, flags, 0640, s->compress, seal, metrics, s->mmap, template, ret);
+        else
+                r = journal_file_open(fname, flags, 0640, s->compress, seal, metrics, s->mmap, template, ret);
+
+        if (r < 0)
+                return r;
+
+        r = journal_file_enable_post_change_timer(*ret, s->event, POST_CHANGE_TIMER_INTERVAL_USEC);
+        if (r < 0) {
+                *ret = journal_file_close(*ret);
+                return r;
+        }
+
+        return r;
+}
+
 static JournalFile* find_journal(Server *s, uid_t uid) {
         _cleanup_free_ char *p = NULL;
         int r;
@@ -280,7 +315,7 @@ static JournalFile* find_journal(Server *s, uid_t uid) {
                 journal_file_close(f);
         }
 
-        r = journal_file_open_reliably(p, O_RDWR|O_CREAT, 0640, s->compress, s->seal, &s->system_metrics, s->mmap, NULL, &f);
+        r = open_journal(s, true, p, O_RDWR|O_CREAT, s->seal, &s->system_metrics, NULL, &f);
         if (r < 0)
                 return s->system_journal;
 
@@ -951,7 +986,7 @@ static int system_journal_open(Server *s, bool flush_requested) {
                 (void) mkdir(fn, 0755);
 
                 fn = strjoina(fn, "/system.journal");
-                r = journal_file_open_reliably(fn, O_RDWR|O_CREAT, 0640, s->compress, s->seal, &s->system_metrics, s->mmap, NULL, &s->system_journal);
+                r = open_journal(s, true, fn, O_RDWR|O_CREAT, s->seal, &s->system_metrics, NULL, &s->system_journal);
 
                 if (r >= 0)
                         server_fix_perms(s, s->system_journal, 0);
@@ -976,7 +1011,7 @@ static int system_journal_open(Server *s, bool flush_requested) {
                          * if it already exists, so that we can flush
                          * it into the system journal */
 
-                        r = journal_file_open(fn, O_RDWR, 0640, s->compress, false, &s->runtime_metrics, s->mmap, NULL, &s->runtime_journal);
+                        r = open_journal(s, false, fn, O_RDWR, false, &s->runtime_metrics, NULL, &s->runtime_journal);
                         free(fn);
 
                         if (r < 0) {
@@ -995,7 +1030,7 @@ static int system_journal_open(Server *s, bool flush_requested) {
                         (void) mkdir("/run/log/journal", 0755);
                         (void) mkdir_parents(fn, 0750);
 
-                        r = journal_file_open_reliably(fn, O_RDWR|O_CREAT, 0640, s->compress, false, &s->runtime_metrics, s->mmap, NULL, &s->runtime_journal);
+                        r = open_journal(s, true, fn, O_RDWR|O_CREAT, false, &s->runtime_metrics, NULL, &s->runtime_journal);
                         free(fn);
 
                         if (r < 0)

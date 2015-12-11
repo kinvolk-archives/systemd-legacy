@@ -35,6 +35,8 @@
 #include "lookup3.h"
 #include "compress.h"
 #include "random-util.h"
+#include "sd-event.h"
+#include "event-util.h"
 
 #define DEFAULT_DATA_HASH_TABLE_SIZE (2047ULL*sizeof(HashItem))
 #define DEFAULT_FIELD_HASH_TABLE_SIZE (333ULL*sizeof(HashItem))
@@ -136,6 +138,17 @@ void journal_file_close(JournalFile *f) {
         if (f->seal && f->writable)
                 journal_file_append_tag(f);
 #endif
+
+        if (f->post_change_timer) {
+                int enabled;
+
+                if (sd_event_source_get_enabled(f->post_change_timer, &enabled) >= 0)
+                        if (enabled == SD_EVENT_ONESHOT)
+                                journal_file_post_change(f);
+
+                sd_event_source_set_enabled(f->post_change_timer, SD_EVENT_OFF);
+                sd_event_source_unref(f->post_change_timer);
+        }
 
         journal_file_set_offline(f);
 
@@ -1394,6 +1407,77 @@ void journal_file_post_change(JournalFile *f) {
                 log_error_errno(errno, "Failed to truncate file to its own size: %m");
 }
 
+static int post_change_thunk(sd_event_source *timer, uint64_t usec, void *userdata) {
+        assert(userdata);
+
+        journal_file_post_change(userdata);
+
+        return 1;
+}
+
+static void schedule_post_change(JournalFile *f) {
+        sd_event_source *timer;
+        int enabled, r;
+        uint64_t now;
+
+        assert(f);
+        assert(f->post_change_timer);
+
+        timer = f->post_change_timer;
+
+        r = sd_event_source_get_enabled(timer, &enabled);
+        if (r < 0) {
+                log_error_errno(-r, "Failed to get ftruncate timer state: %m");
+                return;
+        }
+
+        if (enabled == SD_EVENT_ONESHOT)
+                return;
+
+        r = sd_event_now(sd_event_source_get_event(timer), CLOCK_MONOTONIC, &now);
+        if (r < 0) {
+                log_error_errno(-r, "Failed to get clock's now for scheduling ftruncate: %m");
+                return;
+        }
+
+        r = sd_event_source_set_time(timer, now+f->post_change_timer_period);
+        if (r < 0) {
+                log_error_errno(-r, "Failed to set time for scheduling ftruncate: %m");
+                return;
+        }
+
+        r = sd_event_source_set_enabled(timer, SD_EVENT_ONESHOT);
+        if (r < 0) {
+                log_error_errno(-r, "Failed to enable scheduled ftruncate: %m");
+                return;
+        }
+}
+
+/* Enable coalesced change posting in a timer on the provided sd_event instance */
+int journal_file_enable_post_change_timer(JournalFile *f, sd_event *e, usec_t t) {
+        _cleanup_event_source_unref_ sd_event_source *timer = NULL;
+        int r;
+
+        assert(f);
+        assert_return(!f->post_change_timer, -EINVAL);
+        assert(e);
+        assert(t);
+
+        r = sd_event_add_time(e, &timer, CLOCK_MONOTONIC, 0, 0, post_change_thunk, f);
+        if (r < 0)
+                return r;
+
+        r = sd_event_source_set_enabled(timer, SD_EVENT_OFF);
+        if (r < 0)
+                return r;
+
+        f->post_change_timer = timer;
+        timer = NULL;
+        f->post_change_timer_period = t;
+
+        return r;
+}
+
 static int entry_item_cmp(const void *_a, const void *_b) {
         const EntryItem *a = _a, *b = _b;
 
@@ -1459,7 +1543,10 @@ int journal_file_append_entry(JournalFile *f, const dual_timestamp *ts, const st
         if (mmap_cache_got_sigbus(f->mmap, f->fd))
                 r = -EIO;
 
-        journal_file_post_change(f);
+        if (f->post_change_timer)
+                schedule_post_change(f);
+        else
+                journal_file_post_change(f);
 
         return r;
 }
@@ -2759,6 +2846,14 @@ int journal_file_open(
         if (mmap_cache_got_sigbus(f->mmap, f->fd)) {
                 r = -EIO;
                 goto fail;
+        }
+
+        if (template && template->post_change_timer) {
+                sd_event *e = sd_event_source_get_event(template->post_change_timer);
+
+                r = journal_file_enable_post_change_timer(f, e, template->post_change_timer_period);
+                if (r < 0)
+                        goto fail;
         }
 
         *ret = f;
