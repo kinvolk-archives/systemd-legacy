@@ -384,13 +384,13 @@ void server_sync(Server *s) {
         int r;
 
         if (s->system_journal) {
-                r = journal_file_set_offline(s->system_journal);
+                r = journal_file_set_offline(s->system_journal, false);
                 if (r < 0)
                         log_error_errno(r, "Failed to sync system journal: %m");
         }
 
         ORDERED_HASHMAP_FOREACH_KEY(f, k, s->user_journals, i) {
-                r = journal_file_set_offline(f);
+                r = journal_file_set_offline(f, false);
                 if (r < 0)
                         log_error_errno(r, "Failed to sync user journal: %m");
         }
