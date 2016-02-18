@@ -1210,7 +1210,7 @@ static int add_any_file(sd_journal *j, const char *path) {
                 return set_put_error(j, -ETOOMANYREFS);
         }
 
-        r = journal_file_open(path, O_RDONLY, 0, false, false, NULL, j->mmap, NULL, &f);
+        r = journal_file_open(path, O_RDONLY, 0, false, false, NULL, j->mmap, NULL, NULL, &f);
         if (r < 0)
                 return r;
 

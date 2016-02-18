@@ -262,9 +262,10 @@ static int open_journal(
         assert(ret);
 
         if (reliably)
-                r = journal_file_open_reliably(fname, flags, 0640, s->compress, seal, metrics, s->mmap, template, &f);
+                r = journal_file_open_reliably(fname, flags, 0640, s->compress, seal, metrics, s->mmap, s->deferred_closes, template, &f);
         else
-                r = journal_file_open(fname, flags, 0640, s->compress, seal, metrics, s->mmap, template, &f);
+                r = journal_file_open(fname, flags, 0640, s->compress, seal, metrics, s->mmap, s->deferred_closes, template, &f);
+
         if (r < 0)
                 return r;
 
@@ -344,7 +345,7 @@ static int do_rotate(
         if (!*f)
                 return -EINVAL;
 
-        r = journal_file_rotate(f, s->compress, seal);
+        r = journal_file_rotate(f, s->compress, seal, s->deferred_closes);
         if (r < 0)
                 if (*f)
                         log_error_errno(r, "Failed to rotate %s: %m", (*f)->path);
@@ -375,6 +376,13 @@ void server_rotate(Server *s) {
                         /* Old file has been closed and deallocated */
                         ordered_hashmap_remove(s->user_journals, k);
         }
+
+        /* Perform any deferred closes which aren't still offlining. */
+        SET_FOREACH(f, s->deferred_closes, i)
+                if (!journal_file_is_offlining(f)) {
+                        (void) set_remove(s->deferred_closes, f);
+                        (void) journal_file_close(f);
+                }
 }
 
 void server_sync(Server *s) {
@@ -1534,6 +1542,10 @@ int server_init(Server *s) {
         if (!s->mmap)
                 return log_oom();
 
+        s->deferred_closes = set_new(NULL);
+        if (!s->deferred_closes)
+                return log_oom();
+
         r = sd_event_default(&s->event);
         if (r < 0)
                 return log_error_errno(r, "Failed to create event loop: %m");
@@ -1676,6 +1688,11 @@ void server_maybe_append_tags(Server *s) {
 void server_done(Server *s) {
         JournalFile *f;
         assert(s);
+
+        if (s->deferred_closes) {
+                journal_file_close_set(s->deferred_closes);
+                set_free(s->deferred_closes);
+        }
 
         while (s->stdout_streams)
                 stdout_stream_free(s->stdout_streams);
