@@ -119,7 +119,7 @@ static void journal_file_set_offline_internal(JournalFile *f) {
                         if (!__sync_bool_compare_and_swap(&f->offline_state, OFFLINE_SYNCING, OFFLINE_OFFLINING))
                                 continue;
 
-                        f->header->state = STATE_OFFLINE;
+                        f->header->state = f->archive ? STATE_ARCHIVED : STATE_OFFLINE;
                         (void) fsync(f->fd);
                         break;
 
@@ -3137,7 +3137,8 @@ int journal_file_rotate(JournalFile **f, bool compress, bool seal, Set *deferred
         if (r < 0 && errno != ENOENT)
                 return -errno;
 
-        old_file->header->state = STATE_ARCHIVED;
+        /* Set as archive so offlining commits w/state=STATE_ARCHIVED */
+        old_file->archive = true;
 
         /* Currently, btrfs is not very good with out write patterns
          * and fragments heavily. Let's defrag our journal files when
