@@ -315,8 +315,6 @@ static void link_free(Link *link) {
         if (link->manager)
                 hashmap_remove(link->manager->links, INT_TO_PTR(link->ifindex));
 
-        (void) unlink(link->state_file);
-
         free(link->ifname);
 
         free(link->state_file);
