@@ -592,7 +592,7 @@ static int condition_test_needs_update(Condition *c, char **env) {
          * First, compare seconds as they are always accurate...
          */
         if (usr.st_mtim.tv_sec != other.st_mtim.tv_sec)
-                return usr.st_mtim.tv_sec > other.st_mtim.tv_sec;
+                return true;
 
         /*
          * ...then compare nanoseconds.
@@ -603,7 +603,7 @@ static int condition_test_needs_update(Condition *c, char **env) {
          * (otherwise the filesystem supports nsec timestamps, see stat(2)).
          */
         if (usr.st_mtim.tv_nsec == 0 || other.st_mtim.tv_nsec > 0)
-                return usr.st_mtim.tv_nsec > other.st_mtim.tv_nsec;
+                return usr.st_mtim.tv_nsec != other.st_mtim.tv_nsec;
 
         _cleanup_free_ char *timestamp_str = NULL;
         r = parse_env_file(NULL, p, "TIMESTAMP_NSEC", &timestamp_str);
@@ -622,7 +622,7 @@ static int condition_test_needs_update(Condition *c, char **env) {
                 return true;
         }
 
-        return timespec_load_nsec(&usr.st_mtim) > timestamp;
+        return timespec_load_nsec(&usr.st_mtim) != timestamp;
 }
 
 static int condition_test_first_boot(Condition *c, char **env) {
