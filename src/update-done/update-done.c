@@ -38,7 +38,7 @@ static int apply_timestamp(const char *path, struct timespec *ts) {
         assert(ts);
 
         if (stat(path, &st) >= 0) {
-                /* Is the timestamp file already newer than the OS? If
+                /* Is the timestamp's mtim different from the OS's? If
                  * so, there's nothing to do. We ignore the nanosecond
                  * component of the timestamp, since some file systems
                  * do not support any better accuracy than 1s and we
@@ -46,7 +46,7 @@ static int apply_timestamp(const char *path, struct timespec *ts) {
                  * available. Most notably ext4 on small disks (where
                  * 128 byte inodes are used) does not support better
                  * accuracy than 1s. */
-                if (st.st_mtim.tv_sec > ts->tv_sec)
+                if (st.st_mtim.tv_sec == ts->tv_sec)
                         return 0;
 
                 /* It is older? Then let's update it */
