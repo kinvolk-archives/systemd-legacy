@@ -457,7 +457,7 @@ static int condition_test_needs_update(Condition *c) {
          * First, compare seconds as they are always accurate...
          */
         if (usr.st_mtim.tv_sec != other.st_mtim.tv_sec)
-                return usr.st_mtim.tv_sec > other.st_mtim.tv_sec;
+                return true;
 
         /*
          * ...then compare nanoseconds.
@@ -490,7 +490,7 @@ static int condition_test_needs_update(Condition *c) {
                 timespec_store(&other.st_mtim, timestamp);
         }
 
-        return usr.st_mtim.tv_nsec > other.st_mtim.tv_nsec;
+        return usr.st_mtim.tv_nsec != other.st_mtim.tv_nsec;
 }
 
 static int condition_test_first_boot(Condition *c) {
