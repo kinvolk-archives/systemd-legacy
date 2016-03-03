@@ -294,8 +294,8 @@ static int condition_test_needs_update(Condition *c) {
         if (lstat("/usr/", &usr) < 0)
                 return true;
 
-        return usr.st_mtim.tv_sec > other.st_mtim.tv_sec ||
-                (usr.st_mtim.tv_sec == other.st_mtim.tv_sec && usr.st_mtim.tv_nsec > other.st_mtim.tv_nsec);
+        return usr.st_mtim.tv_sec != other.st_mtim.tv_sec ||
+                (usr.st_mtim.tv_sec == other.st_mtim.tv_sec && usr.st_mtim.tv_nsec != other.st_mtim.tv_nsec);
 }
 
 static int condition_test_first_boot(Condition *c) {
