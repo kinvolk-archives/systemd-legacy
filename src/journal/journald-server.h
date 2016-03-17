@@ -129,6 +129,8 @@ typedef struct Server {
 
         uint64_t *kernel_seqnum;
 
+        Set *deferred_closes;
+
         struct udev *udev;
 
         bool sync_scheduled;
