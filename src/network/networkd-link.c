@@ -2529,14 +2529,6 @@ static int link_configure(Link *link) {
                 return 0;
         }
 
-        /* Drop foreign config, but ignore loopback or critical devices.
-         * We do not want to remove loopback address or addresses used for root NFS. */
-        if (!(link->flags & IFF_LOOPBACK) && !(link->network->dhcp_critical)) {
-                r = link_drop_foreign_config(link);
-                if (r < 0)
-                        return r;
-        }
-
         r = link_set_proxy_arp(link);
         if (r < 0)
                return r;
