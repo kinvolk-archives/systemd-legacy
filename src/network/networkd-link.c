@@ -2001,49 +2001,12 @@ static int link_set_ipv6_hop_limit(Link *link) {
         return 0;
 }
 
-static int link_drop_foreign_config(Link *link) {
-        Address *address;
-        Route *route;
-        Iterator i;
-        int r;
-
-        SET_FOREACH(address, link->addresses_foreign, i) {
-                /* we consider IPv6LL addresses to be managed by the kernel */
-                if (address->family == AF_INET6 && in_addr_is_link_local(AF_INET6, &address->in_addr) == 1)
-                        continue;
-
-                r = address_remove(address, link, link_address_remove_handler);
-                if (r < 0)
-                        return r;
-        }
-
-        SET_FOREACH(route, link->routes_foreign, i) {
-                /* do not touch routes managed by the kernel */
-                if (route->protocol == RTPROT_KERNEL)
-                        continue;
-
-                r = route_remove(route, link, link_address_remove_handler);
-                if (r < 0)
-                        return r;
-        }
-
-        return 0;
-}
-
 static int link_configure(Link *link) {
         int r;
 
         assert(link);
         assert(link->network);
         assert(link->state == LINK_STATE_PENDING);
-
-        /* Drop foreign config, but ignore loopback or critical devices.
-         * We do not want to remove loopback address or addresses used for root NFS. */
-        if (!(link->flags & IFF_LOOPBACK) && !(link->network->dhcp_critical)) {
-                r = link_drop_foreign_config(link);
-                if (r < 0)
-                        return r;
-        }
 
         r = link_set_bridge_fdb(link);
         if (r < 0)
