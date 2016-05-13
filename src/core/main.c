@@ -124,7 +124,7 @@ static bool arg_default_cpu_accounting = false;
 static bool arg_default_blockio_accounting = false;
 static bool arg_default_memory_accounting = false;
 static bool arg_default_tasks_accounting = true;
-static uint64_t arg_default_tasks_max = UINT64_C(512);
+static uint64_t arg_default_tasks_max = UINT64_C(-1);
 static sd_id128_t arg_machine_id = {};
 
 static void pager_open_if_enabled(void) {
