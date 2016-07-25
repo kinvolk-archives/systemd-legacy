@@ -1560,8 +1560,6 @@ int main(int argc, char *argv[]) {
         (void) reset_all_signal_handlers();
         (void) ignore_signals(SIGNALS_IGNORE, -1);
 
-        arg_default_tasks_max = system_tasks_max_scale(15U, 100U); /* 15% the system PIDs equals 4915 by default. */
-
         if (parse_config_file() < 0) {
                 error_message = "Failed to parse config file";
                 goto finish;
