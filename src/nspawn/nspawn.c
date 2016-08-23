@@ -169,7 +169,6 @@ static CustomMount *arg_custom_mounts = NULL;
 static unsigned arg_n_custom_mounts = 0;
 static char **arg_setenv = NULL;
 static bool arg_quiet = false;
-static bool arg_share_system = false;
 static bool arg_register = true;
 static bool arg_keep_unit = false;
 static char **arg_network_interfaces = NULL;
@@ -194,6 +193,7 @@ static int arg_settings_trusted = -1;
 static char **arg_parameters = NULL;
 static const char *arg_container_service_name = "systemd-nspawn";
 static bool arg_notify_ready = false;
+static unsigned long arg_clone_ns_flags = CLONE_NEWIPC|CLONE_NEWPID|CLONE_NEWUTS;
 static MountSettingsMask arg_mount_settings = MOUNT_APPLY_APIVFS_RO;
 
 static void help(void) {
@@ -366,6 +366,17 @@ static void parse_mount_settings_env(void) {
                 arg_mount_settings |= MOUNT_APPLY_APIVFS_RO;
 
         arg_mount_settings &= ~MOUNT_APPLY_APIVFS_NETNS;
+}
+
+static void parse_share_ns_env(const char *name, unsigned long ns_flag) {
+        int r;
+
+        r = getenv_bool(name);
+        if (r == -ENXIO)
+                return;
+        if (r < 0)
+                log_warning_errno(r, "Failed to parse %s from environment, defaulting to false.", name);
+        arg_clone_ns_flags = (arg_clone_ns_flags & ~ns_flag) | (r > 0 ? 0 : ns_flag);
 }
 
 static int parse_argv(int argc, char *argv[]) {
@@ -839,7 +850,9 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_SHARE_SYSTEM:
-                        arg_share_system = true;
+                        /* We don't officially support this anymore, except for compat reasons. People should use the
+                         * $SYSTEMD_NSPAWN_SHARE_* environment variables instead. */
+                        arg_clone_ns_flags = 0;
                         break;
 
                 case ARG_REGISTER:
@@ -1043,8 +1056,18 @@ static int parse_argv(int argc, char *argv[]) {
                         assert_not_reached("Unhandled option");
                 }
 
-        if (arg_share_system)
+        parse_share_ns_env("SYSTEMD_NSPAWN_SHARE_NS_IPC", CLONE_NEWIPC);
+        parse_share_ns_env("SYSTEMD_NSPAWN_SHARE_NS_PID", CLONE_NEWPID);
+        parse_share_ns_env("SYSTEMD_NSPAWN_SHARE_NS_UTS", CLONE_NEWUTS);
+        parse_share_ns_env("SYSTEMD_NSPAWN_SHARE_SYSTEM", CLONE_NEWIPC|CLONE_NEWPID|CLONE_NEWUTS);
+
+        if (arg_clone_ns_flags != (CLONE_NEWIPC|CLONE_NEWPID|CLONE_NEWUTS)) {
                 arg_register = false;
+                if (arg_start_mode != START_PID1) {
+                        log_error("--boot cannot be used without namespacing.");
+                        return -EINVAL;
+                }
+        }
 
         if (arg_userns_mode != USER_NAMESPACE_NO)
                 arg_mount_settings |= MOUNT_USE_USERNS;
@@ -1056,11 +1079,6 @@ static int parse_argv(int argc, char *argv[]) {
 
         if (arg_userns_mode == USER_NAMESPACE_PICK)
                 arg_userns_chown = true;
-
-        if (arg_start_mode != START_PID1 && arg_share_system) {
-                log_error("--boot and --share-system may not be combined.");
-                return -EINVAL;
-        }
 
         if (arg_keep_unit && cg_pid_get_owner_uid(0, NULL) >= 0) {
                 log_error("--keep-unit may not be used when invoked from a user session.");
@@ -1317,9 +1335,6 @@ static int setup_boot_id(const char *dest) {
         const char *from, *to;
         int r;
 
-        if (arg_share_system)
-                return 0;
-
         /* Generate a new randomized boot ID, so that each boot-up of
          * the container gets a new one */
 
@@ -1537,7 +1552,7 @@ static int on_address_change(sd_netlink *rtnl, sd_netlink_message *m, void *user
 
 static int setup_hostname(void) {
 
-        if (arg_share_system)
+        if ((arg_clone_ns_flags & CLONE_NEWUTS) == 0)
                 return 0;
 
         if (sethostname_idempotent(arg_machine) < 0)
@@ -1688,7 +1703,7 @@ static int reset_audit_loginuid(void) {
         _cleanup_free_ char *p = NULL;
         int r;
 
-        if (arg_share_system)
+        if ((arg_clone_ns_flags & CLONE_NEWPID) == 0)
                 return 0;
 
         r = read_one_line_file("/proc/self/loginuid", &p);
@@ -3045,7 +3060,7 @@ static int outer_child(
                 return fd;
 
         pid = raw_clone(SIGCHLD|CLONE_NEWNS|
-                        (arg_share_system ? 0 : CLONE_NEWIPC|CLONE_NEWPID|CLONE_NEWUTS) |
+                        arg_clone_ns_flags |
                         (arg_private_network ? CLONE_NEWNET : 0) |
                         (arg_userns_mode != USER_NAMESPACE_NO ? CLONE_NEWUSER : 0));
         if (pid < 0)
