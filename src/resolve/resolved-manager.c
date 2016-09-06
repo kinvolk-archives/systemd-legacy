@@ -558,10 +558,6 @@ int manager_start(Manager *m) {
 
         assert(m);
 
-        r = manager_dns_stub_start(m);
-        if (r < 0)
-                return r;
-
         r = manager_llmnr_start(m);
         if (r < 0)
                 return r;
