@@ -222,9 +222,10 @@ static int tmpfs_patch_options(
         return !!buf;
 }
 
-int mount_sysfs(const char *dest) {
+int mount_sysfs(const char *dest, MountSettingsMask mount_settings) {
         const char *full, *top, *x;
         int r;
+        unsigned long extra_flags = 0;
 
         top = prefix_roota(dest, "/sys");
         r = path_check_fstype(top, SYSFS_MAGIC);
@@ -241,8 +242,13 @@ int mount_sysfs(const char *dest) {
 
         (void) mkdir(full, 0755);
 
-        if (mount("sysfs", full, "sysfs", MS_RDONLY|MS_NOSUID|MS_NOEXEC|MS_NODEV, NULL) < 0)
-                return log_error_errno(errno, "Failed to mount sysfs to %s: %m", full);
+        if (mount_settings & MOUNT_APPLY_APIVFS_RO)
+                extra_flags |= MS_RDONLY;
+
+        r = mount("sysfs", full, "sysfs",
+                  MS_NOSUID|MS_NOEXEC|MS_NODEV|extra_flags, NULL);
+        if (r < 0)
+                return r;
 
         FOREACH_STRING(x, "block", "bus", "class", "dev", "devices", "kernel") {
                 _cleanup_free_ char *from = NULL, *to = NULL;
@@ -260,8 +266,10 @@ int mount_sysfs(const char *dest) {
                 if (mount(from, to, NULL, MS_BIND, NULL) < 0)
                         return log_error_errno(errno, "Failed to mount /sys/%s into place: %m", x);
 
-                if (mount(NULL, to, NULL, MS_BIND|MS_RDONLY|MS_NOSUID|MS_NOEXEC|MS_NODEV|MS_REMOUNT, NULL) < 0)
-                        return log_error_errno(errno, "Failed to mount /sys/%s read-only: %m", x);
+                r = mount(NULL, to, NULL,
+                          MS_BIND|MS_NOSUID|MS_NOEXEC|MS_NODEV|MS_REMOUNT|extra_flags, NULL);
+                if (r < 0)
+                        return r;
         }
 
         if (umount(full) < 0)
@@ -273,15 +281,14 @@ int mount_sysfs(const char *dest) {
         x = prefix_roota(top, "/fs/kdbus");
         (void) mkdir(x, 0755);
 
-        if (mount(NULL, top, NULL, MS_BIND|MS_RDONLY|MS_NOSUID|MS_NOEXEC|MS_NODEV|MS_REMOUNT, NULL) < 0)
+        if (mount(NULL, top, NULL, MS_BIND|MS_NOSUID|MS_NOEXEC|MS_NODEV|MS_REMOUNT, NULL) < 0)
                 return log_error_errno(errno, "Failed to make %s read-only: %m", top);
 
         return 0;
 }
 
 int mount_all(const char *dest,
-              bool use_userns, bool in_userns,
-              bool use_netns,
+              MountSettingsMask mount_settings,
               uid_t uid_shift, uid_t uid_range,
               const char *selinux_apifs_context) {
 
@@ -291,39 +298,52 @@ int mount_all(const char *dest,
                 const char *type;
                 const char *options;
                 unsigned long flags;
-                bool fatal;
-                bool in_userns;
-                bool use_netns;
+                MountSettingsMask mount_settings;
         } MountPoint;
 
         static const MountPoint mount_table[] = {
-                { "proc",            "/proc",           "proc",  NULL,        MS_NOSUID|MS_NOEXEC|MS_NODEV,                              true,  true,  false },
-                { "/proc/sys",       "/proc/sys",       NULL,    NULL,        MS_BIND,                                                   true,  true,  false },   /* Bind mount first ...*/
-                { "/proc/sys/net",   "/proc/sys/net",   NULL,    NULL,        MS_BIND,                                                   true,  true,  true  },   /* (except for this) */
-                { NULL,              "/proc/sys",       NULL,    NULL,        MS_BIND|MS_RDONLY|MS_NOSUID|MS_NOEXEC|MS_NODEV|MS_REMOUNT, true,  true,  false },   /* ... then, make it r/o */
-                { "tmpfs",           "/sys",            "tmpfs", "mode=755",  MS_NOSUID|MS_NOEXEC|MS_NODEV,                              true,  false, true  },
-                { "sysfs",           "/sys",            "sysfs", NULL,        MS_RDONLY|MS_NOSUID|MS_NOEXEC|MS_NODEV,                    true,  false, false },
-                { "tmpfs",           "/dev",            "tmpfs", "mode=755",  MS_NOSUID|MS_STRICTATIME,                                  true,  false, false },
-                { "tmpfs",           "/dev/shm",        "tmpfs", "mode=1777", MS_NOSUID|MS_NODEV|MS_STRICTATIME,                         true,  false, false },
-                { "tmpfs",           "/run",            "tmpfs", "mode=755",  MS_NOSUID|MS_NODEV|MS_STRICTATIME,                         true,  false, false },
-                { "tmpfs",           "/tmp",            "tmpfs", "mode=1777", MS_STRICTATIME,                                            true,  false, false },
+                /* inner child mounts */
+                { "proc",                "/proc",               "proc",  NULL,        MS_NOSUID|MS_NOEXEC|MS_NODEV,                              MOUNT_FATAL|MOUNT_IN_USERNS },
+                { "/proc/sys",           "/proc/sys",           NULL,    NULL,        MS_BIND,                                                   MOUNT_FATAL|MOUNT_IN_USERNS|MOUNT_APPLY_APIVFS_RO },                          /* Bind mount first ...*/
+                { "/proc/sys/net",       "/proc/sys/net",       NULL,    NULL,        MS_BIND,                                                   MOUNT_FATAL|MOUNT_IN_USERNS|MOUNT_APPLY_APIVFS_RO|MOUNT_APPLY_APIVFS_NETNS }, /* (except for this) */
+                { NULL,                  "/proc/sys",           NULL,    NULL,        MS_BIND|MS_RDONLY|MS_NOSUID|MS_NOEXEC|MS_NODEV|MS_REMOUNT, MOUNT_FATAL|MOUNT_IN_USERNS|MOUNT_APPLY_APIVFS_RO },                          /* ... then, make it r/o */
+                { "/proc/sysrq-trigger", "/proc/sysrq-trigger", NULL,    NULL,        MS_BIND,                                                               MOUNT_IN_USERNS|MOUNT_APPLY_APIVFS_RO },                          /* Bind mount first ...*/
+                { NULL,                  "/proc/sysrq-trigger", NULL,    NULL,        MS_BIND|MS_RDONLY|MS_NOSUID|MS_NOEXEC|MS_NODEV|MS_REMOUNT,             MOUNT_IN_USERNS|MOUNT_APPLY_APIVFS_RO },                          /* ... then, make it r/o */
+                { "tmpfs",               "/tmp",                "tmpfs", "mode=1777", MS_STRICTATIME,                                            MOUNT_FATAL|MOUNT_IN_USERNS },
+
+                /* outer child mounts */
+                { "tmpfs",               "/sys",                "tmpfs", "mode=755",  MS_NOSUID|MS_NOEXEC|MS_NODEV,                              MOUNT_FATAL|MOUNT_APPLY_APIVFS_NETNS },
+                { "sysfs",               "/sys",                "sysfs", NULL,        MS_RDONLY|MS_NOSUID|MS_NOEXEC|MS_NODEV,                    MOUNT_FATAL|MOUNT_APPLY_APIVFS_RO },    /* skipped if above was mounted */
+                { "sysfs",               "/sys",                "sysfs", NULL,                  MS_NOSUID|MS_NOEXEC|MS_NODEV,                    MOUNT_FATAL },                          /* skipped if above was mounted */
+
+                { "tmpfs",               "/dev",                "tmpfs", "mode=755",  MS_NOSUID|MS_STRICTATIME,                                  MOUNT_FATAL },
+                { "tmpfs",               "/dev/shm",            "tmpfs", "mode=1777", MS_NOSUID|MS_NODEV|MS_STRICTATIME,                         MOUNT_FATAL },
+                { "tmpfs",               "/run",                "tmpfs", "mode=755",  MS_NOSUID|MS_NODEV|MS_STRICTATIME,                         MOUNT_FATAL },
 #ifdef HAVE_SELINUX
-                { "/sys/fs/selinux", "/sys/fs/selinux", NULL,     NULL,       MS_BIND,                                                   false, false, false },  /* Bind mount first */
-                { NULL,              "/sys/fs/selinux", NULL,     NULL,       MS_BIND|MS_RDONLY|MS_NOSUID|MS_NOEXEC|MS_NODEV|MS_REMOUNT, false, false, false },  /* Then, make it r/o */
+                { "/sys/fs/selinux",     "/sys/fs/selinux",     NULL,     NULL,       MS_BIND,                                                   0 },  /* Bind mount first */
+                { NULL,                  "/sys/fs/selinux",     NULL,     NULL,       MS_BIND|MS_RDONLY|MS_NOSUID|MS_NOEXEC|MS_NODEV|MS_REMOUNT, 0 },  /* Then, make it r/o */
 #endif
         };
 
         unsigned k;
         int r;
+        bool use_userns = (mount_settings & MOUNT_USE_USERNS);
+        bool netns = (mount_settings & MOUNT_APPLY_APIVFS_NETNS);
+        bool ro = (mount_settings & MOUNT_APPLY_APIVFS_RO);
+        bool in_userns = (mount_settings & MOUNT_IN_USERNS);
 
         for (k = 0; k < ELEMENTSOF(mount_table); k++) {
                 _cleanup_free_ char *where = NULL, *options = NULL;
                 const char *o;
+                bool fatal = (mount_table[k].mount_settings & MOUNT_FATAL);
 
-                if (in_userns != mount_table[k].in_userns)
+                if (in_userns != (bool)(mount_table[k].mount_settings & MOUNT_IN_USERNS))
                         continue;
 
-                if (!use_netns && mount_table[k].use_netns)
+                if (!netns && (bool)(mount_table[k].mount_settings & MOUNT_APPLY_APIVFS_NETNS))
+                        continue;
+
+                if (!ro && (bool)(mount_table[k].mount_settings & MOUNT_APPLY_APIVFS_RO))
                         continue;
 
                 where = prefix_root(dest, mount_table[k].where);
@@ -340,7 +360,7 @@ int mount_all(const char *dest,
 
                 r = mkdir_p(where, 0755);
                 if (r < 0) {
-                        if (mount_table[k].fatal)
+                        if (fatal)
                                 return log_error_errno(r, "Failed to create directory %s: %m", where);
 
                         log_debug_errno(r, "Failed to create directory %s: %m", where);
@@ -362,7 +382,7 @@ int mount_all(const char *dest,
                           mount_table[k].flags,
                           o) < 0) {
 
-                        if (mount_table[k].fatal)
+                        if (fatal)
                                 return log_error_errno(errno, "mount(%s) failed: %m", where);
 
                         log_warning_errno(errno, "mount(%s) failed, ignoring: %m", where);

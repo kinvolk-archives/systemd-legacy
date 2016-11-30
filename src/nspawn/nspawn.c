@@ -194,6 +194,7 @@ static int arg_settings_trusted = -1;
 static char **arg_parameters = NULL;
 static const char *arg_container_service_name = "systemd-nspawn";
 static bool arg_notify_ready = false;
+static MountSettingsMask arg_mount_settings = MOUNT_APPLY_APIVFS_RO;
 
 static void help(void) {
         printf("%s [OPTIONS...] [PATH] [ARGUMENTS...]\n\n"
@@ -340,6 +341,31 @@ static int detect_unified_cgroup_hierarchy(void) {
 
         arg_unified_cgroup_hierarchy = r;
         return 0;
+}
+
+static void parse_mount_settings_env(void) {
+        int r;
+        const char *e;
+
+        e = getenv("SYSTEMD_NSPAWN_API_VFS_WRITABLE");
+        if (!e)
+                return;
+
+        if (streq(e, "network")) {
+                arg_mount_settings |= MOUNT_APPLY_APIVFS_RO|MOUNT_APPLY_APIVFS_NETNS;
+                return;
+        }
+
+        r = parse_boolean(e);
+        if (r < 0) {
+                log_warning_errno(r, "Failed to parse SYSTEMD_NSPAWN_API_VFS_WRITABLE from environment, ignoring.");
+                return;
+        } else if (r > 0)
+                arg_mount_settings &= ~MOUNT_APPLY_APIVFS_RO;
+        else
+                arg_mount_settings |= MOUNT_APPLY_APIVFS_RO;
+
+        arg_mount_settings &= ~MOUNT_APPLY_APIVFS_NETNS;
 }
 
 static int parse_argv(int argc, char *argv[]) {
@@ -1020,6 +1046,14 @@ static int parse_argv(int argc, char *argv[]) {
         if (arg_share_system)
                 arg_register = false;
 
+        if (arg_userns_mode != USER_NAMESPACE_NO)
+                arg_mount_settings |= MOUNT_USE_USERNS;
+
+        if (arg_private_network)
+                arg_mount_settings |= MOUNT_APPLY_APIVFS_NETNS;
+
+        parse_mount_settings_env();
+
         if (arg_userns_mode == USER_NAMESPACE_PICK)
                 arg_userns_chown = true;
 
@@ -1108,6 +1142,15 @@ static int parse_argv(int argc, char *argv[]) {
 }
 
 static int verify_arguments(void) {
+        if (arg_userns_mode != USER_NAMESPACE_NO && (arg_mount_settings & MOUNT_APPLY_APIVFS_NETNS) && !arg_private_network) {
+                log_error("Invalid namespacing settings. Mounting sysfs with --private-users requires --private-network.");
+                return -EINVAL;
+        }
+
+        if (arg_userns_mode != USER_NAMESPACE_NO && !(arg_mount_settings & MOUNT_APPLY_APIVFS_RO)) {
+                log_error("Cannot combine --private-users with read-write mounts.");
+                return -EINVAL;
+        }
 
         if (arg_volatile_mode != VOLATILE_NO && arg_read_only) {
                 log_error("Cannot combine --read-only with --volatile. Note that --volatile already implies a read-only base hierarchy.");
@@ -2573,9 +2616,7 @@ static int inner_child(
         }
 
         r = mount_all(NULL,
-                      arg_userns_mode != USER_NAMESPACE_NO,
-                      true,
-                      arg_private_network,
+                      arg_mount_settings | MOUNT_IN_USERNS,
                       arg_uid_shift,
                       arg_uid_range,
                       arg_selinux_apifs_context);
@@ -2583,7 +2624,7 @@ static int inner_child(
         if (r < 0)
                 return r;
 
-        r = mount_sysfs(NULL);
+        r = mount_sysfs(NULL, arg_mount_settings);
         if (r < 0)
                 return r;
 
@@ -2929,9 +2970,7 @@ static int outer_child(
         }
 
         r = mount_all(directory,
-                      arg_userns_mode != USER_NAMESPACE_NO,
-                      false,
-                      arg_private_network,
+                      arg_mount_settings,
                       arg_uid_shift,
                       arg_uid_range,
                       arg_selinux_apifs_context);
