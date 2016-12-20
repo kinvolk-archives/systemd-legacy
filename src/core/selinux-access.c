@@ -2,7 +2,7 @@
 
 #include "selinux-access.h"
 
-#if HAVE_SELINUX
+#if 0
 
 #include <errno.h>
 #include <selinux/avc.h>
