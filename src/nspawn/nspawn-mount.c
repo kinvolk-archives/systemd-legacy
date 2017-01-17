@@ -369,7 +369,10 @@ int mount_all(const char *dest,
 
                 o = mount_table[k].options;
                 if (streq_ptr(mount_table[k].type, "tmpfs")) {
-                        r = tmpfs_patch_options(o, use_userns, uid_shift, uid_range, selinux_apifs_context, &options);
+                        if (in_userns)
+                                r = tmpfs_patch_options(o, use_userns, 0, uid_range, selinux_apifs_context, &options);
+                        else
+                                r = tmpfs_patch_options(o, use_userns, uid_shift, uid_range, selinux_apifs_context, &options);
                         if (r < 0)
                                 return log_oom();
                         if (r > 0)
