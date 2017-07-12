@@ -1215,10 +1215,16 @@ static int client_handle_offer(sd_dhcp_client *client, DHCPMessage *offer, size_
         lease->next_server = offer->siaddr;
         lease->address = offer->yiaddr;
 
+        /*
+         * The RFC requires this "option", but most clients are more lenient
+         */
+        if (lease->server_address == 0) {
+                log_dhcp_client(client, "Missing server identifier option, non-conforming DHCP");
+        }
+
         if (lease->address == 0 ||
-            lease->server_address == 0 ||
             lease->lifetime == 0) {
-                log_dhcp_client(client, "received lease lacks address, server address or lease lifetime, ignoring");
+                log_dhcp_client(client, "received lease lacks address, or lease lifetime, ignoring");
                 return -ENOMSG;
         }
 
@@ -1285,11 +1291,17 @@ static int client_handle_ack(sd_dhcp_client *client, DHCPMessage *ack, size_t le
 
         lease->address = ack->yiaddr;
 
+        /*
+         * The RFC requires this "option", but most clients are more lenient
+         */
+        if (lease->server_address == 0) {
+                log_dhcp_client(client, "Missing server identifier option, non-conforming DHCP");
+        }
+
         if (lease->address == INADDR_ANY ||
-            lease->server_address == INADDR_ANY ||
             lease->lifetime == 0) {
-                log_dhcp_client(client, "received lease lacks address, server "
-                                "address or lease lifetime, ignoring");
+                log_dhcp_client(client, "received lease lacks address, "
+                                "or lease lifetime, ignoring");
                 return -ENOMSG;
         }
 
