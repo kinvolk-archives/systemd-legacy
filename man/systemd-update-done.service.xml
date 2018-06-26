@@ -51,7 +51,7 @@
     <varname>ConditionNeedsUpdate=</varname> (see
     <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>)
     condition to make sure to run when <filename>/etc</filename> or
-    <filename>/var</filename> are older than <filename>/usr</filename>
+    <filename>/var</filename> aren't the same age as <filename>/usr</filename>
     according to the modification times of the files described above.
     This requires that updates to <filename>/usr</filename> are always
     followed by an update of the modification time of
