@@ -575,4 +575,5 @@ LIBSYSTEMD_240 {
         sd_bus_message_readv;
         sd_bus_set_method_call_timeout;
         sd_bus_get_method_call_timeout;
+        sd_bus_error_move;
 } LIBSYSTEMD_239;
