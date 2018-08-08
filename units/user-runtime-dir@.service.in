@@ -10,7 +10,7 @@
 [Unit]
 Description=User runtime directory /run/user/%i
 Documentation=man:user@.service(5)
-After=systemd-user-sessions.service
+After=systemd-user-sessions.service dbus.service
 StopWhenUnneeded=yes
 
 [Service]
