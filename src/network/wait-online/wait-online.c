@@ -19,7 +19,7 @@ static usec_t arg_timeout = 120 * USEC_PER_SEC;
 static Hashmap *arg_interfaces = NULL;
 static char **arg_ignore = NULL;
 static LinkOperationalStateRange arg_required_operstate = { _LINK_OPERSTATE_INVALID, _LINK_OPERSTATE_INVALID };
-static bool arg_any = false;
+static bool arg_any = true;
 
 STATIC_DESTRUCTOR_REGISTER(arg_interfaces, hashmap_free_free_freep);
 STATIC_DESTRUCTOR_REGISTER(arg_ignore, strv_freep);
