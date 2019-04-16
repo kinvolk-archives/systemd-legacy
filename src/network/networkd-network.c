@@ -383,6 +383,8 @@ int network_load_one(Manager *manager, const char *filename) {
                 /* If LinkLocalAddressing= is not set, then set to ADDRESS_FAMILY_IPV6 later. */
                 .link_local = _ADDRESS_FAMILY_BOOLEAN_INVALID,
 
+                .ip_forward = _ADDRESS_FAMILY_BOOLEAN_INVALID,
+
                 .ipv6_privacy_extensions = IPV6_PRIVACY_EXTENSIONS_NO,
                 .ipv6_accept_ra = -1,
                 .ipv6_dad_transmits = -1,
