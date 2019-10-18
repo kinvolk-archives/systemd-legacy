@@ -365,6 +365,7 @@ possible_cc_flags = [
 possible_link_flags = [
         '-Wl,-z,relro',
         '-Wl,-z,now',
+        '-fstack-protector',
 ]
 
 if cc.get_id() == 'clang'
@@ -625,6 +626,7 @@ progs = [['quotaon',    '/usr/sbin/quotaon'    ],
          ['umount',     '/usr/bin/umount',     'UMOUNT_PATH'],
          ['loadkeys',   '/usr/bin/loadkeys',   'KBD_LOADKEYS'],
          ['setfont',    '/usr/bin/setfont',    'KBD_SETFONT'],
+         ['nologin',    '/usr/sbin/nologin',   ],
         ]
 foreach prog : progs
         path = get_option(prog[0] + '-path')
@@ -1282,7 +1284,7 @@ if dns_over_tls != 'false'
                 have_openssl = conf.get('HAVE_OPENSSL') == 1
                 if dns_over_tls != 'auto' and not have_openssl
                         str = dns_over_tls == 'openssl' ? ' with openssl' : ''
-                        error('DNS-over-TLS support was requested$0$, but dependencies are not available'.format(str))
+                        error('DNS-over-TLS support was requested@0@, but dependencies are not available'.format(str))
                 endif
         endif
         have = have_gnutls or have_openssl
@@ -1327,7 +1329,7 @@ if want_remote != 'false'
                      conf.get('HAVE_LIBCURL') == 1]
         # sd-j-remote requires µhttpd, and sd-j-upload requires libcurl, so
         # it's possible to build one without the other. Complain only if
-        # support was explictly requested. The auxiliary files like sysusers
+        # support was explicitly requested. The auxiliary files like sysusers
         # config should be installed when any of the programs are built.
         if want_remote == 'true' and not (have_deps[0] and have_deps[1])
                 error('remote support was requested, but dependencies are not available')

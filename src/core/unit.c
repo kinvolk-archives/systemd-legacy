@@ -804,7 +804,7 @@ static void merge_dependencies(Unit *u, Unit *other, const char *other_id, UnitD
         assert(other);
         assert(d < _UNIT_DEPENDENCY_MAX);
 
-        /* Fix backwards pointers. Let's iterate through all dependendent units of the other unit. */
+        /* Fix backwards pointers. Let's iterate through all dependent units of the other unit. */
         HASHMAP_FOREACH_KEY(v, back, other->dependencies[d], i) {
                 UnitDependency k;
 
@@ -1722,7 +1722,6 @@ static bool unit_verify_deps(Unit *u) {
 int unit_start(Unit *u) {
         UnitActiveState state;
         Unit *following;
-        int r;
 
         assert(u);
 
@@ -1745,25 +1744,8 @@ int unit_start(Unit *u) {
          * still be useful to speed up activation in case there is some hold-off time, but we don't want to
          * recheck the condition in that case. */
         if (state != UNIT_ACTIVATING &&
-            !unit_test_condition(u)) {
-
-                /* Let's also check the start limit here. Normally, the start limit is only checked by the
-                 * .start() method of the unit type after it did some additional checks verifying everything
-                 * is in order (so that those other checks can propagate errors properly). However, if a
-                 * condition check doesn't hold we don't get that far but we should still ensure we are not
-                 * called in a tight loop without a rate limit check enforced, hence do the check here. Note
-                 * that ECOMM is generally not a reason for a job to fail, unlike most other errors here,
-                 * hence the chance is big that any triggering unit for us will trigger us again. Note this
-                 * condition check is a bit different from the condition check inside the per-unit .start()
-                 * function, as this one will not change the unit's state in any way (and we shouldn't here,
-                 * after all the condition failed). */
-
-                r = unit_test_start_limit(u);
-                if (r < 0)
-                        return r;
-
+            !unit_test_condition(u))
                 return log_unit_debug_errno(u, SYNTHETIC_ERRNO(ECOMM), "Starting requested but condition failed. Not starting unit.");
-        }
 
         /* If the asserts failed, fail the entire job */
         if (state != UNIT_ACTIVATING &&
@@ -2677,7 +2659,7 @@ int unit_enqueue_rewatch_pids(Unit *u) {
 
                 r = sd_event_source_set_priority(s, SD_EVENT_PRIORITY_IDLE);
                 if (r < 0)
-                        return log_error_errno(r, "Failed to adjust priority of event source for tidying watched PIDs: m");
+                        return log_error_errno(r, "Failed to adjust priority of event source for tidying watched PIDs: %m");
 
                 (void) sd_event_source_set_description(s, "tidy-watch-pids");
 
@@ -3682,6 +3664,7 @@ int unit_add_node_dependency(Unit *u, const char *what, bool wants, UnitDependen
 int unit_coldplug(Unit *u) {
         int r = 0, q;
         char **i;
+        Job *uj;
 
         assert(u);
 
@@ -3704,8 +3687,9 @@ int unit_coldplug(Unit *u) {
                         r = q;
         }
 
-        if (u->job) {
-                q = job_coldplug(u->job);
+        uj = u->job ?: u->nop_job;
+        if (uj) {
+                q = job_coldplug(uj);
                 if (q < 0 && r >= 0)
                         r = q;
         }
@@ -5020,7 +5004,7 @@ int unit_set_exec_params(Unit *u, ExecParameters *p) {
         p->prefix = u->manager->prefix;
         SET_FLAG(p->flags, EXEC_PASS_LOG_UNIT|EXEC_CHOWN_DIRECTORIES, MANAGER_IS_SYSTEM(u->manager));
 
-        /* Copy paramaters from unit */
+        /* Copy parameters from unit */
         p->cgroup_path = u->cgroup_path;
         SET_FLAG(p->flags, EXEC_CGROUP_DELEGATE, unit_cgroup_delegate(u));
 
@@ -5517,16 +5501,26 @@ void unit_log_failure(Unit *u, const char *result) {
 
 void unit_log_process_exit(
                 Unit *u,
-                int level,
                 const char *kind,
                 const char *command,
+                bool success,
                 int code,
                 int status) {
+
+        int level;
 
         assert(u);
         assert(kind);
 
-        if (code != CLD_EXITED)
+        /* If this is a successful exit, let's log about the exit code on DEBUG level. If this is a failure
+         * and the process exited on its own via exit(), then let's make this a NOTICE, under the assumption
+         * that the service already logged the reason at a higher log level on its own. Otherwise, make it a
+         * WARNING. */
+        if (success)
+                level = LOG_DEBUG;
+        else if (code == CLD_EXITED)
+                level = LOG_NOTICE;
+        else
                 level = LOG_WARNING;
 
         log_struct(level,

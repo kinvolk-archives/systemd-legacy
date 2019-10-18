@@ -55,7 +55,7 @@ int parse_uid(const char *s, uid_t *ret) {
 
         if (!uid_is_valid(uid))
                 return -ENXIO; /* we return ENXIO instead of EINVAL
-                                * here, to make it easy to distuingish
+                                * here, to make it easy to distinguish
                                 * invalid numeric uids from invalid
                                 * strings. */
 
@@ -146,7 +146,7 @@ static int synthesize_user_creds(
                         *home = FLAGS_SET(flags, USER_CREDS_CLEAN) ? NULL : "/";
 
                 if (shell)
-                        *shell = FLAGS_SET(flags, USER_CREDS_CLEAN) ? NULL : "/sbin/nologin";
+                        *shell = FLAGS_SET(flags, USER_CREDS_CLEAN) ? NULL : NOLOGIN;
 
                 return 0;
         }
@@ -408,9 +408,8 @@ char* gid_to_name(gid_t gid) {
 }
 
 int in_gid(gid_t gid) {
-        long ngroups_max;
         gid_t *gids;
-        int r, i;
+        int ngroups, r, i;
 
         if (getgid() == gid)
                 return 1;
@@ -421,12 +420,15 @@ int in_gid(gid_t gid) {
         if (!gid_is_valid(gid))
                 return -EINVAL;
 
-        ngroups_max = sysconf(_SC_NGROUPS_MAX);
-        assert(ngroups_max > 0);
+        ngroups = getgroups(0, NULL);
+        if (ngroups < 0)
+                return -errno;
+        if (ngroups == 0)
+                return 0;
 
-        gids = newa(gid_t, ngroups_max);
+        gids = newa(gid_t, ngroups);
 
-        r = getgroups(ngroups_max, gids);
+        r = getgroups(ngroups, gids);
         if (r < 0)
                 return -errno;
 
@@ -536,7 +538,7 @@ int get_shell(char **_s) {
         }
         if (synthesize_nobody() &&
             u == UID_NOBODY) {
-                s = strdup("/sbin/nologin");
+                s = strdup(NOLOGIN);
                 if (!s)
                         return -ENOMEM;
 

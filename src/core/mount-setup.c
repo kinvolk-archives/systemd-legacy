@@ -486,6 +486,7 @@ static int relabel_extra(void) {
                         }
 
                         log_debug("Relabelling additional file/directory '%s'.", line);
+                        (void) label_fix(line, 0);
                         (void) nftw(line, nftw_cb, 64, FTW_MOUNT|FTW_PHYS|FTW_ACTIONRETVAL);
                         c++;
                 }
@@ -494,8 +495,9 @@ static int relabel_extra(void) {
                         log_warning_errno(errno, "Failed to remove /run/systemd/relabel-extra.d/%s, ignoring: %m", de->d_name);
         }
 
-        /* Remove when we completing things. */
-        if (rmdir("/run/systemd/relabel-extra.d") < 0)
+        /* Remove when we complete things. */
+        if (rmdir("/run/systemd/relabel-extra.d") < 0 &&
+            errno != ENOENT)
                 log_warning_errno(errno, "Failed to remove /run/systemd/relabel-extra.d/ directory: %m");
 
         return c;

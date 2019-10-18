@@ -924,7 +924,7 @@ _public_ sd_bus_message* sd_bus_message_unref(sd_bus_message *m) {
 
         /* Unset the bus field if neither the user has a reference nor this message is queued. We are careful
          * to reset the field only after the last reference to the bus is dropped, after all we might keep
-         * multiple references to the bus, once for each reference kept on outselves. */
+         * multiple references to the bus, once for each reference kept on ourselves. */
         m->bus = NULL;
 
         return message_free(m);
@@ -5265,7 +5265,7 @@ int bus_message_parse_fields(sd_bus_message *m) {
                         if (!b)
                                 return -EBADMSG;
 
-                        sig = strndup(b+1, item_size - (b+1-(char*) q));
+                        sig = memdup_suffix0(b+1, item_size - (b+1-(char*) q));
                         if (!sig)
                                 return -ENOMEM;
 

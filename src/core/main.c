@@ -1201,9 +1201,9 @@ static void bump_file_max_and_nr_open(void) {
 #endif
 
 #if BUMP_PROC_SYS_FS_FILE_MAX
-        /* I so wanted to use STRINGIFY(ULONG_MAX) here, but alas we can't as glibc/gcc define that as
-         * "(0x7fffffffffffffffL * 2UL + 1UL)". Seriously. 😢 */
-        if (asprintf(&t, "%lu\n", ULONG_MAX) < 0) {
+        /* The maximum the kernel allows for this since 5.2 is LONG_MAX, use that. (Previously thing where
+         * different but the operation would fail silently.) */
+        if (asprintf(&t, "%li\n", LONG_MAX) < 0) {
                 log_oom();
                 return;
         }
@@ -1781,7 +1781,7 @@ static void do_reexecute(
         args[i++] = NULL;
         assert(i <= args_size);
 
-        /* Reenable any blocked signals, especially important if we switch from initial ramdisk to init=... */
+        /* Re-enable any blocked signals, especially important if we switch from initial ramdisk to init=... */
         (void) reset_all_signal_handlers();
         (void) reset_signal_mask();
         (void) rlimit_nofile_safe();
@@ -2020,7 +2020,7 @@ static int initialize_runtime(
                 return 0;
 
         if (arg_system) {
-                /* Make sure we leave a core dump without panicing the kernel. */
+                /* Make sure we leave a core dump without panicking the kernel. */
                 install_crash_handler();
 
                 if (!skip_setup) {

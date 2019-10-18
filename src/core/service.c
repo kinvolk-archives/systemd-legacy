@@ -2507,14 +2507,16 @@ static int service_serialize_exec_command(Unit *u, FILE *f, ExecCommand *command
                         return log_oom();
 
                 n = strlen(e);
-                if (!GREEDY_REALLOC(args, allocated, length + 1 + n + 1))
+                if (!GREEDY_REALLOC(args, allocated, length + 2 + n + 2))
                         return log_oom();
 
                 if (length > 0)
                         args[length++] = ' ';
 
+                args[length++] = '"';
                 memcpy(args + length, e, n);
                 length += n;
+                args[length++] = '"';
         }
 
         if (!GREEDY_REALLOC(args, allocated, length + 1))
@@ -2659,7 +2661,7 @@ static int service_deserialize_exec_command(Unit *u, const char *key, const char
         for (;;) {
                 _cleanup_free_ char *arg = NULL;
 
-                r = extract_first_word(&value, &arg, NULL, EXTRACT_CUNESCAPE);
+                r = extract_first_word(&value, &arg, NULL, EXTRACT_CUNESCAPE | EXTRACT_QUOTES);
                 if (r < 0)
                         return r;
                 if (r == 0)
@@ -3269,14 +3271,11 @@ static void service_sigchld_event(Unit *u, pid_t pid, int code, int status) {
                                 f = SERVICE_SUCCESS;
                 }
 
-                /* When this is a successful exit, let's log about the exit code on DEBUG level. If this is a failure
-                 * and the process exited on its own via exit(), then let's make this a NOTICE, under the assumption
-                 * that the service already logged the reason at a higher log level on its own. (Internally,
-                 * unit_log_process_exit() will possibly bump this to WARNING if the service died due to a signal.) */
                 unit_log_process_exit(
-                                u, f == SERVICE_SUCCESS ? LOG_DEBUG : LOG_NOTICE,
+                                u,
                                 "Main process",
                                 service_exec_command_to_string(SERVICE_EXEC_START),
+                                f == SERVICE_SUCCESS,
                                 code, status);
 
                 if (s->result == SERVICE_SUCCESS)
@@ -3367,9 +3366,10 @@ static void service_sigchld_event(Unit *u, pid_t pid, int code, int status) {
                 }
 
                 unit_log_process_exit(
-                                u, f == SERVICE_SUCCESS ? LOG_DEBUG : LOG_NOTICE,
+                                u,
                                 "Control process",
                                 service_exec_command_to_string(s->control_command_id),
+                                f == SERVICE_SUCCESS,
                                 code, status);
 
                 if (s->result == SERVICE_SUCCESS)

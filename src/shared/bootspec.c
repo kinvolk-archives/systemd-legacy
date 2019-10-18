@@ -475,6 +475,7 @@ static int boot_entries_find_unified(
                 _cleanup_free_ char *j = NULL, *osrelease = NULL, *cmdline = NULL;
                 _cleanup_close_ int fd = -1;
 
+                dirent_ensure_type(d, de);
                 if (!dirent_is_file(de))
                         continue;
 
@@ -870,7 +871,7 @@ static int verify_esp_blkid(
         errno = 0;
         r = blkid_probe_lookup_value(b, "PART_ENTRY_NUMBER", &v, NULL);
         if (r != 0)
-                return log_error_errno(errno ?: SYNTHETIC_ERRNO(EIO), "Failed to probe partition number of \"%s\": m", node);
+                return log_error_errno(errno ?: SYNTHETIC_ERRNO(EIO), "Failed to probe partition number of \"%s\": %m", node);
         r = safe_atou32(v, &part);
         if (r < 0)
                 return log_error_errno(r, "Failed to parse PART_ENTRY_NUMBER field.");
@@ -1077,12 +1078,12 @@ static int verify_esp(
          *
          *  -ENOENT        → if 'searching' is set, and the dir doesn't exist
          *  -EADDRNOTAVAIL → if 'searching' is set, and the dir doesn't look like an ESP
-         *  -EACESS        → if 'unprivileged_mode' is set, and we have trouble acessing the thing
+         *  -EACESS        → if 'unprivileged_mode' is set, and we have trouble accessing the thing
          */
 
         relax_checks = getenv_bool("SYSTEMD_RELAX_ESP_CHECKS") > 0;
 
-        /* Non-root user can only check the status, so if an error occured in the following, it does not cause any
+        /* Non-root user can only check the status, so if an error occurred in the following, it does not cause any
          * issues. Let's also, silence the error messages. */
 
         if (!relax_checks) {

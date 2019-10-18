@@ -77,7 +77,7 @@ static int link_set_dhcp_routes(Link *link) {
         if (n == -ENODATA)
                 log_link_debug_errno(link, n, "DHCP: No routes received from DHCP server: %m");
         else if (n < 0)
-                log_link_debug_errno(link, n, "DHCP error: could not get routes: %m");
+                log_link_debug_errno(link, n, "DHCP: could not get routes: %m");
 
         for (i = 0; i < n; i++) {
                 switch (sd_dhcp_route_get_option(static_routes[i])) {
@@ -471,7 +471,7 @@ static int dhcp_lease_acquired(sd_dhcp_client *client, Link *link) {
                         if (r < 0)
                                 log_link_warning_errno(link, r, "Unable to shorten overlong DHCP hostname '%s', ignoring: %m", dhcpname);
                         if (r == 1)
-                                log_link_notice(link, "Overlong DCHP hostname received, shortened from '%s' to '%s'", dhcpname, hostname);
+                                log_link_notice(link, "Overlong DHCP hostname received, shortened from '%s' to '%s'", dhcpname, hostname);
                 }
 
                 if (hostname) {

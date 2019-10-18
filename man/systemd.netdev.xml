@@ -826,13 +826,13 @@
       <varlistentry>
         <term><varname>Name=</varname></term>
         <listitem>
-          <para>Specifies the name of the sesssion. This option is compulsory.</para>
+          <para>Specifies the name of the session. This option is compulsory.</para>
         </listitem>
       </varlistentry>
       <varlistentry>
         <term><varname>SessionId=</varname></term>
         <listitem>
-          <para>Specifies the sesssion id. The value used must match the <literal>SessionId=</literal> value being used at the peer.
+          <para>Specifies the session id. The value used must match the <literal>SessionId=</literal> value being used at the peer.
           Ranges a number between 1 and 4294967295). This option is compulsory.</para>
         </listitem>
       </varlistentry>
@@ -1497,8 +1497,8 @@
       <varlistentry>
         <term><varname>ARPIntervalSec=</varname></term>
         <listitem>
-          <para>Specifies the ARP link monitoring frequency in milliseconds.
-          A value of 0 disables ARP monitoring. The default value is 0.
+          <para>Specifies the ARP link monitoring frequency. A value of 0 disables ARP monitoring. The
+          default value is 0, and the default unit seconds.
           </para>
         </listitem>
       </varlistentry>

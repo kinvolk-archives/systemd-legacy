@@ -174,6 +174,14 @@ int network_verify(Network *network) {
         assert(network);
         assert(network->filename);
 
+        if (set_isempty(network->match_mac) && strv_isempty(network->match_path) &&
+            strv_isempty(network->match_driver) && strv_isempty(network->match_type) &&
+            strv_isempty(network->match_name) && !network->conditions)
+                log_warning("%s: No valid settings found in the [Match] section. "
+                            "The file will match all interfaces. "
+                            "If that is intended, please add Name=* in the [Match] section.",
+                            network->filename);
+
         /* skip out early if configuration does not match the environment */
         if (!condition_test_list(network->conditions, NULL, NULL, NULL))
                 return log_debug_errno(SYNTHETIC_ERRNO(EINVAL),
@@ -338,7 +346,7 @@ int network_load_one(Manager *manager, const char *filename) {
                 .dhcp_use_dns = true,
                 .dhcp_use_hostname = true,
                 .dhcp_use_routes = true,
-                /* NOTE: this var might be overwriten by network_apply_anonymize_if_set */
+                /* NOTE: this var might be overwritten by network_apply_anonymize_if_set */
                 .dhcp_send_hostname = true,
                 /* To enable/disable RFC7844 Anonymity Profiles */
                 .dhcp_anonymize = false,
@@ -471,7 +479,7 @@ int network_load(Manager *manager) {
         STRV_FOREACH_BACKWARDS(f, files) {
                 r = network_load_one(manager, *f);
                 if (r < 0)
-                        return r;
+                        log_error_errno(r, "Failed to load %s, ignoring: %m", *f);
         }
 
         return 0;
@@ -856,7 +864,7 @@ int config_parse_dhcp(
         if (s < 0) {
 
                 /* Previously, we had a slightly different enum here,
-                 * support its values for compatbility. */
+                 * support its values for compatibility. */
 
                 if (streq(rvalue, "none"))
                         s = ADDRESS_FAMILY_NO;
