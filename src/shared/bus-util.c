@@ -218,7 +218,7 @@ int bus_test_polkit(
                 const char **details,
                 uid_t good_user,
                 bool *_challenge,
-                sd_bus_error *e) {
+                sd_bus_error *ret_error) {
 
         int r;
 
@@ -283,11 +283,11 @@ int bus_test_polkit(
                 if (r < 0)
                         return r;
 
-                r = sd_bus_call(call->bus, request, 0, e, &reply);
+                r = sd_bus_call(call->bus, request, 0, ret_error, &reply);
                 if (r < 0) {
                         /* Treat no PK available as access denied */
-                        if (sd_bus_error_has_name(e, SD_BUS_ERROR_SERVICE_UNKNOWN)) {
-                                sd_bus_error_free(e);
+                        if (sd_bus_error_has_name(ret_error, SD_BUS_ERROR_SERVICE_UNKNOWN)) {
+                                sd_bus_error_free(ret_error);
                                 return -EACCES;
                         }
 
@@ -377,7 +377,7 @@ int bus_verify_polkit_async(
                 bool interactive,
                 uid_t good_user,
                 Hashmap **registry,
-                sd_bus_error *error) {
+                sd_bus_error *ret_error) {
 
 #if ENABLE_POLKIT
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *pk = NULL;
@@ -417,7 +417,7 @@ int bus_verify_polkit_async(
                                 return -EACCES;
 
                         /* Copy error from polkit reply */
-                        sd_bus_error_copy(error, e);
+                        sd_bus_error_copy(ret_error, e);
                         return -sd_bus_error_get_errno(e);
                 }
 
@@ -432,7 +432,7 @@ int bus_verify_polkit_async(
                         return 1;
 
                 if (challenge)
-                        return sd_bus_error_set(error, SD_BUS_ERROR_INTERACTIVE_AUTHORIZATION_REQUIRED, "Interactive authentication required.");
+                        return sd_bus_error_set(ret_error, SD_BUS_ERROR_INTERACTIVE_AUTHORIZATION_REQUIRED, "Interactive authentication required.");
 
                 return -EACCES;
         }
