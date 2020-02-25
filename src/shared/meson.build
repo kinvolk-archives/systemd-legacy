@@ -27,8 +27,12 @@ shared_sources = files('''
         bus-unit-util.h
         bus-util.c
         bus-util.h
+        bus-polkit.c
+        bus-polkit.h
         bus-wait-for-jobs.c
         bus-wait-for-jobs.h
+        bus-wait-for-units.c
+        bus-wait-for-units.h
         calendarspec.c
         calendarspec.h
         cgroup-show.c
@@ -50,6 +54,8 @@ shared_sources = files('''
         dev-setup.h
         dissect-image.c
         dissect-image.h
+        dm-util.c
+        dm-util.h
         dns-domain.c
         dns-domain.h
         dropin.c
@@ -59,6 +65,8 @@ shared_sources = files('''
         enable-mempool.c
         env-file-label.c
         env-file-label.h
+        ethtool-util.c
+        ethtool-util.h
         exec-util.c
         exec-util.h
         exit-status.c
@@ -70,6 +78,7 @@ shared_sources = files('''
         firewall-util.h
         format-table.c
         format-table.h
+        fsck-util.h
         fstab-util.c
         fstab-util.h
         generator.c
@@ -96,6 +105,14 @@ shared_sources = files('''
         json.c
         json.h
         libmount-util.h
+        linux/auto_dev-ioctl.h
+        linux/bpf.h
+        linux/bpf_common.h
+        linux/bpf_insn.h
+        linux/dm-ioctl.h
+        linux/ethtool.h
+        local-addresses.c
+        local-addresses.h
         lockfile-util.c
         lockfile-util.h
         log-link.h
@@ -157,7 +174,11 @@ shared_sources = files('''
         udev-util.h
         uid-range.c
         uid-range.h
+        unit-file.c
+        unit-file.h
         utmp-wtmp.h
+        varlink.c
+        varlink.h
         verbs.c
         verbs.h
         vlan-util.c
@@ -168,7 +189,6 @@ shared_sources = files('''
         watchdog.h
         web-util.c
         web-util.h
-        wireguard-netlink.h
         xml.c
         xml.h
 '''.split())

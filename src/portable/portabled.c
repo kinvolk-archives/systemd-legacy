@@ -7,7 +7,7 @@
 #include "sd-daemon.h"
 
 #include "alloc-util.h"
-#include "bus-util.h"
+#include "bus-polkit.h"
 #include "def.h"
 #include "main-func.h"
 #include "portabled-bus.h"
@@ -134,10 +134,8 @@ static int run(int argc, char *argv[]) {
 
         umask(0022);
 
-        if (argc != 1) {
-                log_error("This program takes no arguments.");
-                return -EINVAL;
-        }
+        if (argc != 1)
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "This program takes no arguments.");
 
         assert_se(sigprocmask_many(SIG_BLOCK, NULL, SIGCHLD, SIGTERM, SIGINT, -1) >= 0);
 

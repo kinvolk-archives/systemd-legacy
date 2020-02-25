@@ -11,7 +11,6 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include "sd-bus-protocol.h"
 #include "sd-bus.h"
 #include "sd-daemon.h"
 #include "sd-event.h"
@@ -24,15 +23,13 @@
 #include "bus-util.h"
 #include "cap-list.h"
 #include "cgroup-util.h"
-#include "def.h"
-#include "escape.h"
-#include "fd-util.h"
 #include "missing.h"
 #include "mountpoint-util.h"
 #include "nsflags.h"
 #include "parse-util.h"
-#include "proc-cmdline.h"
+#include "path-util.h"
 #include "rlimit-util.h"
+#include "socket-util.h"
 #include "stdio-util.h"
 #include "strv.h"
 #include "user-util.h"
@@ -185,357 +182,6 @@ int bus_name_has_owner(sd_bus *c, const char *name, sd_bus_error *error) {
                 return sd_bus_error_set_errno(error, r);
 
         return has_owner;
-}
-
-static int check_good_user(sd_bus_message *m, uid_t good_user) {
-        _cleanup_(sd_bus_creds_unrefp) sd_bus_creds *creds = NULL;
-        uid_t sender_uid;
-        int r;
-
-        assert(m);
-
-        if (good_user == UID_INVALID)
-                return 0;
-
-        r = sd_bus_query_sender_creds(m, SD_BUS_CREDS_EUID, &creds);
-        if (r < 0)
-                return r;
-
-        /* Don't trust augmented credentials for authorization */
-        assert_return((sd_bus_creds_get_augmented_mask(creds) & SD_BUS_CREDS_EUID) == 0, -EPERM);
-
-        r = sd_bus_creds_get_euid(creds, &sender_uid);
-        if (r < 0)
-                return r;
-
-        return sender_uid == good_user;
-}
-
-int bus_test_polkit(
-                sd_bus_message *call,
-                int capability,
-                const char *action,
-                const char **details,
-                uid_t good_user,
-                bool *_challenge,
-                sd_bus_error *e) {
-
-        int r;
-
-        assert(call);
-        assert(action);
-
-        /* Tests non-interactively! */
-
-        r = check_good_user(call, good_user);
-        if (r != 0)
-                return r;
-
-        r = sd_bus_query_sender_privilege(call, capability);
-        if (r < 0)
-                return r;
-        else if (r > 0)
-                return 1;
-#if ENABLE_POLKIT
-        else {
-                _cleanup_(sd_bus_message_unrefp) sd_bus_message *request = NULL;
-                _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
-                int authorized = false, challenge = false;
-                const char *sender, **k, **v;
-
-                sender = sd_bus_message_get_sender(call);
-                if (!sender)
-                        return -EBADMSG;
-
-                r = sd_bus_message_new_method_call(
-                                call->bus,
-                                &request,
-                                "org.freedesktop.PolicyKit1",
-                                "/org/freedesktop/PolicyKit1/Authority",
-                                "org.freedesktop.PolicyKit1.Authority",
-                                "CheckAuthorization");
-                if (r < 0)
-                        return r;
-
-                r = sd_bus_message_append(
-                                request,
-                                "(sa{sv})s",
-                                "system-bus-name", 1, "name", "s", sender,
-                                action);
-                if (r < 0)
-                        return r;
-
-                r = sd_bus_message_open_container(request, 'a', "{ss}");
-                if (r < 0)
-                        return r;
-
-                STRV_FOREACH_PAIR(k, v, details) {
-                        r = sd_bus_message_append(request, "{ss}", *k, *v);
-                        if (r < 0)
-                                return r;
-                }
-
-                r = sd_bus_message_close_container(request);
-                if (r < 0)
-                        return r;
-
-                r = sd_bus_message_append(request, "us", 0, NULL);
-                if (r < 0)
-                        return r;
-
-                r = sd_bus_call(call->bus, request, 0, e, &reply);
-                if (r < 0) {
-                        /* Treat no PK available as access denied */
-                        if (sd_bus_error_has_name(e, SD_BUS_ERROR_SERVICE_UNKNOWN)) {
-                                sd_bus_error_free(e);
-                                return -EACCES;
-                        }
-
-                        return r;
-                }
-
-                r = sd_bus_message_enter_container(reply, 'r', "bba{ss}");
-                if (r < 0)
-                        return r;
-
-                r = sd_bus_message_read(reply, "bb", &authorized, &challenge);
-                if (r < 0)
-                        return r;
-
-                if (authorized)
-                        return 1;
-
-                if (_challenge) {
-                        *_challenge = challenge;
-                        return 0;
-                }
-        }
-#endif
-
-        return -EACCES;
-}
-
-#if ENABLE_POLKIT
-
-typedef struct AsyncPolkitQuery {
-        sd_bus_message *request, *reply;
-        sd_bus_message_handler_t callback;
-        void *userdata;
-        sd_bus_slot *slot;
-        Hashmap *registry;
-} AsyncPolkitQuery;
-
-static void async_polkit_query_free(AsyncPolkitQuery *q) {
-
-        if (!q)
-                return;
-
-        sd_bus_slot_unref(q->slot);
-
-        if (q->registry && q->request)
-                hashmap_remove(q->registry, q->request);
-
-        sd_bus_message_unref(q->request);
-        sd_bus_message_unref(q->reply);
-
-        free(q);
-}
-
-static int async_polkit_callback(sd_bus_message *reply, void *userdata, sd_bus_error *error) {
-        _cleanup_(sd_bus_error_free) sd_bus_error error_buffer = SD_BUS_ERROR_NULL;
-        AsyncPolkitQuery *q = userdata;
-        int r;
-
-        assert(reply);
-        assert(q);
-
-        q->slot = sd_bus_slot_unref(q->slot);
-        q->reply = sd_bus_message_ref(reply);
-
-        r = sd_bus_message_rewind(q->request, true);
-        if (r < 0) {
-                r = sd_bus_reply_method_errno(q->request, r, NULL);
-                goto finish;
-        }
-
-        r = q->callback(q->request, q->userdata, &error_buffer);
-        r = bus_maybe_reply_error(q->request, r, &error_buffer);
-
-finish:
-        async_polkit_query_free(q);
-
-        return r;
-}
-
-#endif
-
-int bus_verify_polkit_async(
-                sd_bus_message *call,
-                int capability,
-                const char *action,
-                const char **details,
-                bool interactive,
-                uid_t good_user,
-                Hashmap **registry,
-                sd_bus_error *error) {
-
-#if ENABLE_POLKIT
-        _cleanup_(sd_bus_message_unrefp) sd_bus_message *pk = NULL;
-        AsyncPolkitQuery *q;
-        const char *sender, **k, **v;
-        sd_bus_message_handler_t callback;
-        void *userdata;
-        int c;
-#endif
-        int r;
-
-        assert(call);
-        assert(action);
-        assert(registry);
-
-        r = check_good_user(call, good_user);
-        if (r != 0)
-                return r;
-
-#if ENABLE_POLKIT
-        q = hashmap_get(*registry, call);
-        if (q) {
-                int authorized, challenge;
-
-                /* This is the second invocation of this function, and
-                 * there's already a response from polkit, let's
-                 * process it */
-                assert(q->reply);
-
-                if (sd_bus_message_is_method_error(q->reply, NULL)) {
-                        const sd_bus_error *e;
-
-                        e = sd_bus_message_get_error(q->reply);
-
-                        /* Treat no PK available as access denied */
-                        if (sd_bus_error_has_name(e, SD_BUS_ERROR_SERVICE_UNKNOWN))
-                                return -EACCES;
-
-                        /* Copy error from polkit reply */
-                        sd_bus_error_copy(error, e);
-                        return -sd_bus_error_get_errno(e);
-                }
-
-                r = sd_bus_message_enter_container(q->reply, 'r', "bba{ss}");
-                if (r >= 0)
-                        r = sd_bus_message_read(q->reply, "bb", &authorized, &challenge);
-
-                if (r < 0)
-                        return r;
-
-                if (authorized)
-                        return 1;
-
-                if (challenge)
-                        return sd_bus_error_set(error, SD_BUS_ERROR_INTERACTIVE_AUTHORIZATION_REQUIRED, "Interactive authentication required.");
-
-                return -EACCES;
-        }
-#endif
-
-        r = sd_bus_query_sender_privilege(call, capability);
-        if (r < 0)
-                return r;
-        else if (r > 0)
-                return 1;
-
-#if ENABLE_POLKIT
-        if (sd_bus_get_current_message(call->bus) != call)
-                return -EINVAL;
-
-        callback = sd_bus_get_current_handler(call->bus);
-        if (!callback)
-                return -EINVAL;
-
-        userdata = sd_bus_get_current_userdata(call->bus);
-
-        sender = sd_bus_message_get_sender(call);
-        if (!sender)
-                return -EBADMSG;
-
-        c = sd_bus_message_get_allow_interactive_authorization(call);
-        if (c < 0)
-                return c;
-        if (c > 0)
-                interactive = true;
-
-        r = hashmap_ensure_allocated(registry, NULL);
-        if (r < 0)
-                return r;
-
-        r = sd_bus_message_new_method_call(
-                        call->bus,
-                        &pk,
-                        "org.freedesktop.PolicyKit1",
-                        "/org/freedesktop/PolicyKit1/Authority",
-                        "org.freedesktop.PolicyKit1.Authority",
-                        "CheckAuthorization");
-        if (r < 0)
-                return r;
-
-        r = sd_bus_message_append(
-                        pk,
-                        "(sa{sv})s",
-                        "system-bus-name", 1, "name", "s", sender,
-                        action);
-        if (r < 0)
-                return r;
-
-        r = sd_bus_message_open_container(pk, 'a', "{ss}");
-        if (r < 0)
-                return r;
-
-        STRV_FOREACH_PAIR(k, v, details) {
-                r = sd_bus_message_append(pk, "{ss}", *k, *v);
-                if (r < 0)
-                        return r;
-        }
-
-        r = sd_bus_message_close_container(pk);
-        if (r < 0)
-                return r;
-
-        r = sd_bus_message_append(pk, "us", interactive, NULL);
-        if (r < 0)
-                return r;
-
-        q = new0(AsyncPolkitQuery, 1);
-        if (!q)
-                return -ENOMEM;
-
-        q->request = sd_bus_message_ref(call);
-        q->callback = callback;
-        q->userdata = userdata;
-
-        r = hashmap_put(*registry, call, q);
-        if (r < 0) {
-                async_polkit_query_free(q);
-                return r;
-        }
-
-        q->registry = *registry;
-
-        r = sd_bus_call_async(call->bus, &q->slot, pk, async_polkit_callback, q, 0);
-        if (r < 0) {
-                async_polkit_query_free(q);
-                return r;
-        }
-
-        return 0;
-#endif
-
-        return -EACCES;
-}
-
-void bus_verify_polkit_async_registry_free(Hashmap *registry) {
-#if ENABLE_POLKIT
-        hashmap_free_with_destructor(registry, async_polkit_query_free);
-#endif
 }
 
 int bus_check_peercred(sd_bus *c) {
@@ -794,7 +440,7 @@ static int bus_print_property(const char *name, const char *expected_value, sd_b
 
                         bus_print_property_value(name, expected_value, value, "[not set]");
 
-                else if ((STR_IN_SET(name, "MemoryLow", "MemoryHigh", "MemoryMax", "MemorySwapMax", "MemoryLimit") && u == CGROUP_LIMIT_MAX) ||
+                else if ((STR_IN_SET(name, "DefaultMemoryLow", "DefaultMemoryMin", "MemoryLow", "MemoryHigh", "MemoryMax", "MemorySwapMax", "MemoryLimit") && u == CGROUP_LIMIT_MAX) ||
                          (STR_IN_SET(name, "TasksMax", "DefaultTasksMax") && u == (uint64_t) -1) ||
                          (startswith(name, "Limit") && u == (uint64_t) -1) ||
                          (startswith(name, "DefaultLimit") && u == (uint64_t) -1))
@@ -989,7 +635,7 @@ int bus_message_print_all_properties(
                                 return log_oom();
                 }
 
-                name_with_equal = strappend(name, "=");
+                name_with_equal = strjoin(name, "=");
                 if (!name_with_equal)
                         return log_oom();
 
@@ -1479,14 +1125,6 @@ int bus_property_get_ulong(
 }
 #endif
 
-int bus_log_parse_error(int r) {
-        return log_error_errno(r, "Failed to parse bus message: %m");
-}
-
-int bus_log_create_error(int r) {
-        return log_error_errno(r, "Failed to create bus message: %m");
-}
-
 /**
  * bus_path_encode_unique() - encode unique object path
  * @b: bus connection or NULL
@@ -1552,7 +1190,7 @@ int bus_path_encode_unique(sd_bus *b, const char *prefix, const char *sender_id,
         if (!external_label)
                 return -ENOMEM;
 
-        p = strjoin(prefix, "/", sender_label, "/", external_label);
+        p = path_join(prefix, sender_label, external_label);
         if (!p)
                 return -ENOMEM;
 
@@ -1688,7 +1326,8 @@ int bus_open_system_watch_bind_with_description(sd_bus **ret, const char *descri
 
         assert(ret);
 
-        /* Match like sd_bus_open_system(), but with the "watch_bind" feature and the Connected() signal turned on. */
+        /* Match like sd_bus_open_system(), but with the "watch_bind" feature and the Connected() signal
+         * turned on. */
 
         r = sd_bus_new(&bus);
         if (r < 0)
@@ -1709,10 +1348,6 @@ int bus_open_system_watch_bind_with_description(sd_bus **ret, const char *descri
                 return r;
 
         r = sd_bus_set_bus_client(bus, true);
-        if (r < 0)
-                return r;
-
-        r = sd_bus_set_trusted(bus, true);
         if (r < 0)
                 return r;
 
@@ -1744,8 +1379,8 @@ int bus_reply_pair_array(sd_bus_message *m, char **l) {
 
         assert(m);
 
-        /* Reply to the specified message with a message containing a dictionary put together from the specified
-         * strv */
+        /* Reply to the specified message with a message containing a dictionary put together from the
+         * specified strv */
 
         r = sd_bus_message_new_method_return(m, &reply);
         if (r < 0)
@@ -1767,3 +1402,13 @@ int bus_reply_pair_array(sd_bus_message *m, char **l) {
 
         return sd_bus_send(NULL, reply, NULL);
 }
+
+static void bus_message_unref_wrapper(void *m) {
+        sd_bus_message_unref(m);
+}
+
+const struct hash_ops bus_message_hash_ops = {
+        .hash = trivial_hash_func,
+        .compare = trivial_compare_func,
+        .free_value = bus_message_unref_wrapper,
+};

@@ -50,7 +50,7 @@ struct sd_ipv4ll {
         void* userdata;
 };
 
-#define log_ipv4ll_errno(ll, error, fmt, ...) log_internal(LOG_DEBUG, error, __FILE__, __LINE__, __func__, "IPV4LL: " fmt, ##__VA_ARGS__)
+#define log_ipv4ll_errno(ll, error, fmt, ...) log_internal(LOG_DEBUG, error, PROJECT_FILE, __LINE__, __func__, "IPV4LL: " fmt, ##__VA_ARGS__)
 #define log_ipv4ll(ll, fmt, ...) log_ipv4ll_errno(ll, 0, fmt, ##__VA_ARGS__)
 
 static void ipv4ll_on_acd(sd_ipv4acd *ll, int event, void *userdata);
@@ -242,7 +242,7 @@ static int ipv4ll_start_internal(sd_ipv4ll *ll, bool reset_generation) {
                 picked_address = true;
         }
 
-        r = sd_ipv4acd_start(ll->acd);
+        r = sd_ipv4acd_start(ll->acd, reset_generation);
         if (r < 0) {
 
                 /* We couldn't start? If so, let's forget the picked address again, the user might make a change and

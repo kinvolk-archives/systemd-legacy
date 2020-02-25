@@ -517,7 +517,7 @@ static int manager_receive_response(sd_event_source *source, int fd, uint32_t re
 
         root_distance = ntp_ts_short_to_d(&ntpmsg.root_delay) / 2 + ntp_ts_short_to_d(&ntpmsg.root_dispersion);
         if (root_distance > (double) m->max_root_distance_usec / (double) USEC_PER_SEC) {
-                log_debug("Server has too large root distance. Disconnecting.");
+                log_info("Server has too large root distance. Disconnecting.");
                 return manager_connect(m);
         }
 
@@ -617,9 +617,9 @@ static int manager_receive_response(sd_event_source *source, int fd, uint32_t re
                 m->good = true;
 
                 server_address_pretty(m->current_server_address, &pretty);
-                /* "for the first time", as further successful syncs will not be logged. */
-                log_info("Synchronized to time server for the first time %s (%s).", strna(pretty), m->current_server_name->string);
-                sd_notifyf(false, "STATUS=Synchronized to time server for the first time %s (%s).", strna(pretty), m->current_server_name->string);
+                /* "Initial", as further successful syncs will not be logged. */
+                log_info("Initial synchronization to time server %s (%s).", strna(pretty), m->current_server_name->string);
+                sd_notifyf(false, "STATUS=Initial synchronization to time server %s (%s).", strna(pretty), m->current_server_name->string);
         }
 
         r = manager_arm_timer(m, m->poll_interval_usec);
@@ -1024,7 +1024,7 @@ static int manager_network_event_handler(sd_event_source *s, int fd, uint32_t re
         sd_network_monitor_flush(m->network_monitor);
 
         /* When manager_network_read_link_servers() failed, we assume that the servers are changed. */
-        changed = !!manager_network_read_link_servers(m);
+        changed = manager_network_read_link_servers(m);
 
         /* check if the machine is online */
         online = network_is_online();

@@ -55,7 +55,7 @@ static inline void FileHandleClosep(EFI_FILE_HANDLE *handle) {
         uefi_call_wrapper((*handle)->Close, 1, *handle);
 }
 
-const EFI_GUID loader_guid;
+extern const EFI_GUID loader_guid;
 
 #define UINTN_MAX (~(UINTN)0)
 #define INTN_MAX ((INTN)(UINTN_MAX>>1))
@@ -66,3 +66,5 @@ const EFI_GUID loader_guid;
                 (ptr) = NULL;                   \
                 _ptr_;                          \
         })
+
+EFI_STATUS log_oom(void);

@@ -20,6 +20,7 @@
 #include "blkid-util.h"
 #include "device-util.h"
 #include "efivars.h"
+#include "errno-util.h"
 #include "fd-util.h"
 #include "gpt.h"
 #include "parse-util.h"
@@ -113,7 +114,7 @@ static int find_gpt_root(sd_device *dev, blkid_probe pr, bool test) {
         errno = 0;
         pl = blkid_probe_get_partitions(pr);
         if (!pl)
-                return -errno ?: -ENOMEM;
+                return errno_or_else(ENOMEM);
 
         nvals = blkid_partlist_numof_partitions(pl);
         for (i = 0; i < nvals; i++) {
@@ -265,7 +266,7 @@ static int builtin_blkid(sd_device *dev, int argc, char *argv[], bool test) {
         if (r < 0)
                 return log_device_debug_errno(dev, r, "Failed to get device name: %m");
 
-        fd = open(devnode, O_RDONLY|O_CLOEXEC);
+        fd = open(devnode, O_RDONLY|O_CLOEXEC|O_NONBLOCK);
         if (fd < 0)
                 return log_device_debug_errno(dev, errno, "Failed to open block device %s: %m", devnode);
 
@@ -310,7 +311,7 @@ static int builtin_blkid(sd_device *dev, int argc, char *argv[], bool test) {
         return 0;
 }
 
-const struct udev_builtin udev_builtin_blkid = {
+const UdevBuiltin udev_builtin_blkid = {
         .name = "blkid",
         .cmd = builtin_blkid,
         .help = "Filesystem and partition probing",

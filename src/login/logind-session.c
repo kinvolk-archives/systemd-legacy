@@ -5,7 +5,6 @@
 #include <linux/kd.h>
 #include <linux/vt.h>
 #include <signal.h>
-#include <stdio_ext.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
@@ -23,7 +22,11 @@
 #include "fileio.h"
 #include "format-util.h"
 #include "io-util.h"
+#include "logind-dbus.h"
+#include "logind-seat-dbus.h"
+#include "logind-session-dbus.h"
 #include "logind-session.h"
+#include "logind-user-dbus.h"
 #include "mkdir.h"
 #include "parse-util.h"
 #include "path-util.h"
@@ -64,7 +67,7 @@ int session_new(Session **ret, Manager *m, const char *id) {
                 .tty_validity = _TTY_VALIDITY_INVALID,
         };
 
-        s->state_file = strappend("/run/systemd/sessions/", id);
+        s->state_file = path_join("/run/systemd/sessions", id);
         if (!s->state_file)
                 return -ENOMEM;
 
@@ -92,8 +95,6 @@ Session* session_free(Session *s) {
                 LIST_REMOVE(gc_queue, s->manager->session_gc_queue, s);
 
         s->timer_event_source = sd_event_source_unref(s->timer_event_source);
-
-        session_remove_fifo(s);
 
         session_drop_controller(s);
 
@@ -142,7 +143,13 @@ Session* session_free(Session *s) {
 
         hashmap_remove(s->manager->sessions, s->id);
 
+        sd_event_source_unref(s->fifo_event_source);
+        safe_close(s->fifo_fd);
+
+        /* Note that we remove neither the state file nor the fifo path here, since we want both to survive
+         * daemon restarts */
         free(s->state_file);
+        free(s->fifo_path);
 
         return mfree(s);
 }
@@ -214,7 +221,6 @@ int session_save(Session *s) {
         if (r < 0)
                 goto fail;
 
-        (void) __fsetlocking(f, FSETLOCKING_BYCALLER);
         (void) fchmod(fileno(f), 0644);
 
         fprintf(f,
@@ -897,7 +903,7 @@ static int get_tty_atime(const char *tty, usec_t *atime) {
         assert(atime);
 
         if (!path_is_absolute(tty)) {
-                p = strappend("/dev/", tty);
+                p = path_join("/dev", tty);
                 if (!p)
                         return -ENOMEM;
 
@@ -927,63 +933,57 @@ static int get_process_ctty_atime(pid_t pid, usec_t *atime) {
 }
 
 int session_get_idle_hint(Session *s, dual_timestamp *t) {
-        usec_t atime = 0, n;
+        usec_t atime = 0;
         int r;
 
         assert(s);
 
-        /* Explicit idle hint is set */
-        if (s->idle_hint) {
+        /* Graphical sessions have an explicit idle hint */
+        if (SESSION_TYPE_IS_GRAPHICAL(s->type)) {
                 if (t)
                         *t = s->idle_hint_timestamp;
 
                 return s->idle_hint;
         }
 
-        /* Graphical sessions should really implement a real
-         * idle hint logic */
-        if (SESSION_TYPE_IS_GRAPHICAL(s->type))
-                goto dont_know;
-
-        /* For sessions with an explicitly configured tty, let's check
-         * its atime */
+        /* For sessions with an explicitly configured tty, let's check its atime */
         if (s->tty) {
                 r = get_tty_atime(s->tty, &atime);
                 if (r >= 0)
                         goto found_atime;
         }
 
-        /* For sessions with a leader but no explicitly configured
-         * tty, let's check the controlling tty of the leader */
+        /* For sessions with a leader but no explicitly configured tty, let's check the controlling tty of
+         * the leader */
         if (pid_is_valid(s->leader)) {
                 r = get_process_ctty_atime(s->leader, &atime);
                 if (r >= 0)
                         goto found_atime;
         }
 
-dont_know:
         if (t)
-                *t = s->idle_hint_timestamp;
+                *t = DUAL_TIMESTAMP_NULL;
 
-        return 0;
+        return false;
 
 found_atime:
         if (t)
                 dual_timestamp_from_realtime(t, atime);
 
-        n = now(CLOCK_REALTIME);
-
         if (s->manager->idle_action_usec <= 0)
-                return 0;
+                return false;
 
-        return atime + s->manager->idle_action_usec <= n;
+        return usec_add(atime, s->manager->idle_action_usec) <= now(CLOCK_REALTIME);
 }
 
-void session_set_idle_hint(Session *s, bool b) {
+int session_set_idle_hint(Session *s, bool b) {
         assert(s);
 
+        if (!SESSION_TYPE_IS_GRAPHICAL(s->type))
+                return -ENOTTY;
+
         if (s->idle_hint == b)
-                return;
+                return 0;
 
         s->idle_hint = b;
         dual_timestamp_get(&s->idle_hint_timestamp);
@@ -995,6 +995,8 @@ void session_set_idle_hint(Session *s, bool b) {
 
         user_send_changed(s->user, "IdleHint", "IdleSinceHint", "IdleSinceHintMonotonic", NULL);
         manager_send_changed(s->manager, "IdleHint", "IdleSinceHint", "IdleSinceHintMonotonic", NULL);
+
+        return 1;
 }
 
 int session_get_locked_hint(Session *s) {
@@ -1179,7 +1181,7 @@ static int session_open_vt(Session *s) {
 
 int session_prepare_vt(Session *s) {
         int vt, r;
-        struct vt_mode mode = { 0 };
+        struct vt_mode mode = {};
 
         if (s->vtnr < 1)
                 return 0;

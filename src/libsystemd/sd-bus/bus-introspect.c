@@ -1,7 +1,5 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
-#include <stdio_ext.h>
-
 #include "bus-internal.h"
 #include "bus-introspect.h"
 #include "bus-objects.h"
@@ -18,11 +16,9 @@ int introspect_begin(struct introspect *i, bool trusted) {
         zero(*i);
         i->trusted = trusted;
 
-        i->f = open_memstream(&i->introspection, &i->size);
+        i->f = open_memstream_unlocked(&i->introspection, &i->size);
         if (!i->f)
                 return -ENOMEM;
-
-        (void) __fsetlocking(i->f, FSETLOCKING_BYCALLER);
 
         fputs(BUS_INTROSPECT_DOCTYPE
               "<node>\n", i->f);
@@ -164,7 +160,7 @@ int introspect_write_interface(struct introspect *i, const sd_bus_vtable *v) {
                 case _SD_BUS_VTABLE_SIGNAL:
                         fprintf(i->f, "  <signal name=\"%s\">\n", v->x.signal.member);
                         if (bus_vtable_has_names(vtable))
-                                names = strempty(v->x.method.names);
+                                names = strempty(v->x.signal.names);
                         introspect_write_arguments(i, strempty(v->x.signal.signature), &names, NULL);
                         introspect_write_flags(i, v->type, v->flags);
                         fputs("  </signal>\n", i->f);
@@ -176,13 +172,10 @@ int introspect_write_interface(struct introspect *i, const sd_bus_vtable *v) {
         return 0;
 }
 
-int introspect_finish(struct introspect *i, sd_bus *bus, sd_bus_message *m, sd_bus_message **reply) {
-        sd_bus_message *q;
+int introspect_finish(struct introspect *i, char **ret) {
         int r;
 
         assert(i);
-        assert(m);
-        assert(reply);
 
         fputs("</node>\n", i->f);
 
@@ -190,25 +183,17 @@ int introspect_finish(struct introspect *i, sd_bus *bus, sd_bus_message *m, sd_b
         if (r < 0)
                 return r;
 
-        r = sd_bus_message_new_method_return(m, &q);
-        if (r < 0)
-                return r;
+        i->f = safe_fclose(i->f);
+        *ret = TAKE_PTR(i->introspection);
 
-        r = sd_bus_message_append(q, "s", i->introspection);
-        if (r < 0) {
-                sd_bus_message_unref(q);
-                return r;
-        }
-
-        *reply = q;
         return 0;
 }
 
 void introspect_free(struct introspect *i) {
         assert(i);
 
-        safe_fclose(i->f);
+        /* Normally introspect_finish() does all the work, this is just a backup for error paths */
 
+        safe_fclose(i->f);
         free(i->introspection);
-        zero(*i);
 }

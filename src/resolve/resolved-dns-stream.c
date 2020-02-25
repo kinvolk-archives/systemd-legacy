@@ -61,7 +61,7 @@ static int dns_stream_complete(DnsStream *s, int error) {
         assert(error >= 0);
 
         /* Error is > 0 when the connection failed for some reason in the network stack. It's == 0 if we sent
-         * and receieved exactly one packet each (in the LLMNR client case). */
+         * and received exactly one packet each (in the LLMNR client case). */
 
 #if ENABLE_DNS_OVER_TLS
         if (s->encrypted) {
@@ -515,6 +515,7 @@ int dns_stream_new(
                 .n_ref = 1,
                 .fd = -1,
                 .protocol = protocol,
+                .type = type,
         };
 
         r = ordered_set_ensure_allocated(&s->write_queue, &dns_packet_hash_ops);

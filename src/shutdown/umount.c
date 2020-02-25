@@ -5,6 +5,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <linux/dm-ioctl.h>
 #include <linux/loop.h>
 #include <string.h>
 #include <sys/mount.h>
@@ -23,7 +24,6 @@
 #include "fd-util.h"
 #include "fstab-util.h"
 #include "libmount-util.h"
-#include "linux-3.13/dm-ioctl.h"
 #include "mount-setup.h"
 #include "mount-util.h"
 #include "mountpoint-util.h"
@@ -55,20 +55,15 @@ void mount_points_list_free(MountPoint **head) {
 }
 
 int mount_points_list_get(const char *mountinfo, MountPoint **head) {
-        _cleanup_(mnt_free_tablep) struct libmnt_table *t = NULL;
-        _cleanup_(mnt_free_iterp) struct libmnt_iter *i = NULL;
+        _cleanup_(mnt_free_tablep) struct libmnt_table *table = NULL;
+        _cleanup_(mnt_free_iterp) struct libmnt_iter *iter = NULL;
         int r;
 
         assert(head);
 
-        t = mnt_new_table();
-        i = mnt_new_iter(MNT_ITER_FORWARD);
-        if (!t || !i)
-                return log_oom();
-
-        r = mnt_table_parse_mtab(t, mountinfo);
+        r = libmount_parse(mountinfo, NULL, &table, &iter);
         if (r < 0)
-                return log_error_errno(r, "Failed to parse %s: %m", mountinfo);
+                return log_error_errno(r, "Failed to parse %s: %m", mountinfo ?: "/proc/self/mountinfo");
 
         for (;;) {
                 struct libmnt_fs *fs;
@@ -79,11 +74,11 @@ int mount_points_list_get(const char *mountinfo, MountPoint **head) {
                 bool try_remount_ro;
                 _cleanup_free_ MountPoint *m = NULL;
 
-                r = mnt_table_next_fs(t, i, &fs);
+                r = mnt_table_next_fs(table, iter, &fs);
                 if (r == 1)
                         break;
                 if (r < 0)
-                        return log_error_errno(r, "Failed to get next entry from %s: %m", mountinfo);
+                        return log_error_errno(r, "Failed to get next entry from %s: %m", mountinfo ?: "/proc/self/mountinfo");
 
                 path = mnt_fs_get_target(fs);
                 if (!path)
@@ -190,8 +185,10 @@ int swap_list_get(const char *swaps, MountPoint **head) {
                 return log_oom();
 
         r = mnt_table_parse_swaps(t, swaps);
+        if (r == -ENOENT) /* no /proc/swaps is fine */
+                return 0;
         if (r < 0)
-                return log_error_errno(r, "Failed to parse %s: %m", swaps);
+                return log_error_errno(r, "Failed to parse %s: %m", swaps ?: "/proc/swaps");
 
         for (;;) {
                 struct libmnt_fs *fs;
@@ -202,7 +199,7 @@ int swap_list_get(const char *swaps, MountPoint **head) {
                 if (r == 1)
                         break;
                 if (r < 0)
-                        return log_error_errno(r, "Failed to get next entry from %s: %m", swaps);
+                        return log_error_errno(r, "Failed to get next entry from %s: %m", swaps ?: "/proc/swaps");
 
                 source = mnt_fs_get_source(fs);
                 if (!source)
@@ -390,7 +387,7 @@ static int remount_with_timeout(MountPoint *m, int umount_log_level) {
 
         assert(m);
 
-        /* Due to the possiblity of a remount operation hanging, we
+        /* Due to the possibility of a remount operation hanging, we
          * fork a child process and set a timeout. If the timeout
          * lapses, the assumption is that that particular remount
          * failed. */
@@ -428,7 +425,7 @@ static int umount_with_timeout(MountPoint *m, int umount_log_level) {
 
         assert(m);
 
-        /* Due to the possiblity of a umount operation hanging, we
+        /* Due to the possibility of a umount operation hanging, we
          * fork a child process and set a timeout. If the timeout
          * lapses, the assumption is that that particular umount
          * failed. */
@@ -486,7 +483,7 @@ static int mount_points_list_umount(MountPoint **head, bool *changed, int umount
                          * underlying mount. There's nothing we can do
                          * about it for the general case, but we can
                          * do something about it if it is aliased
-                         * somehwere else via a bind mount. If we
+                         * somewhere else via a bind mount. If we
                          * explicitly remount the super block of that
                          * alias read-only we hence should be
                          * relatively safe regarding keeping a dirty fs
@@ -530,13 +527,14 @@ static int swap_points_list_off(MountPoint **head, bool *changed) {
 
         LIST_FOREACH_SAFE(mount_point, m, n, *head) {
                 log_info("Deactivating swap %s.", m->path);
-                if (swapoff(m->path) == 0) {
-                        *changed = true;
-                        mount_point_free(head, m);
-                } else {
+                if (swapoff(m->path) < 0) {
                         log_warning_errno(errno, "Could not deactivate swap %s: %m", m->path);
                         n_failed++;
+                        continue;
                 }
+
+                *changed = true;
+                mount_point_free(head, m);
         }
 
         return n_failed;
@@ -566,15 +564,15 @@ static int loopback_points_list_detach(MountPoint **head, bool *changed, int umo
 
                 log_info("Detaching loopback %s.", m->path);
                 r = delete_loopback(m->path);
-                if (r >= 0) {
-                        if (r > 0)
-                                *changed = true;
-
-                        mount_point_free(head, m);
-                } else {
-                        log_full_errno(umount_log_level, errno, "Could not detach loopback %s: %m", m->path);
+                if (r < 0) {
+                        log_full_errno(umount_log_level, r, "Could not detach loopback %s: %m", m->path);
                         n_failed++;
+                        continue;
                 }
+                if (r > 0)
+                        *changed = true;
+
+                mount_point_free(head, m);
         }
 
         return n_failed;
@@ -599,23 +597,24 @@ static int dm_points_list_detach(MountPoint **head, bool *changed, int umount_lo
                         continue;
                 }
 
-                log_info("Detaching DM %u:%u.", major(m->devnum), minor(m->devnum));
+                log_info("Detaching DM %s (%u:%u).", m->path, major(m->devnum), minor(m->devnum));
                 r = delete_dm(m->devnum);
-                if (r >= 0) {
-                        *changed = true;
-                        mount_point_free(head, m);
-                } else {
-                        log_full_errno(umount_log_level, errno, "Could not detach DM %s: %m", m->path);
+                if (r < 0) {
+                        log_full_errno(umount_log_level, r, "Could not detach DM %s: %m", m->path);
                         n_failed++;
+                        continue;
                 }
+
+                *changed = true;
+                mount_point_free(head, m);
         }
 
         return n_failed;
 }
 
 static int umount_all_once(bool *changed, int umount_log_level) {
-        int r;
         _cleanup_(mount_points_list_free) LIST_HEAD(MountPoint, mp_list_head);
+        int r;
 
         assert(changed);
 

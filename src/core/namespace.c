@@ -32,6 +32,7 @@
 #include "string-table.h"
 #include "string-util.h"
 #include "strv.h"
+#include "tmpfile-util.h"
 #include "umask-util.h"
 #include "user-util.h"
 
@@ -444,7 +445,7 @@ static int prefix_where_needed(MountEntry *m, size_t n, const char *root_directo
                 if (m[i].has_prefix)
                         continue;
 
-                s = prefix_root(root_directory, mount_entry_path(m+i));
+                s = path_join(root_directory, mount_entry_path(m+i));
                 if (!s)
                         return -ENOMEM;
 
@@ -1187,7 +1188,8 @@ int setup_namespace(
                 ProtectHome protect_home,
                 ProtectSystem protect_system,
                 unsigned long mount_flags,
-                DissectImageFlags dissect_image_flags) {
+                DissectImageFlags dissect_image_flags,
+                char **error_path) {
 
         _cleanup_(loop_device_unrefp) LoopDevice *loop_device = NULL;
         _cleanup_(decrypted_image_unrefp) DecryptedImage *decrypted_image = NULL;
@@ -1440,6 +1442,8 @@ int setup_namespace(
                 proc_self_mountinfo = fopen("/proc/self/mountinfo", "re");
                 if (!proc_self_mountinfo) {
                         r = log_debug_errno(errno, "Failed to open /proc/self/mountinfo: %m");
+                        if (error_path)
+                                *error_path = strdup("/proc/self/mountinfo");
                         goto finish;
                 }
 
@@ -1453,8 +1457,11 @@ int setup_namespace(
                                         continue;
 
                                 r = follow_symlink(root, m);
-                                if (r < 0)
+                                if (r < 0) {
+                                        if (error_path && mount_entry_path(m))
+                                                *error_path = strdup(mount_entry_path(m));
                                         goto finish;
+                                }
                                 if (r == 0) {
                                         /* We hit a symlinked mount point. The entry got rewritten and might point to a
                                          * very different place now. Let's normalize the changed list, and start from
@@ -1465,8 +1472,11 @@ int setup_namespace(
                                 }
 
                                 r = apply_mount(root, m);
-                                if (r < 0)
+                                if (r < 0) {
+                                        if (error_path && mount_entry_path(m))
+                                                *error_path = strdup(mount_entry_path(m));
                                         goto finish;
+                                }
 
                                 m->applied = true;
                         }
@@ -1490,8 +1500,11 @@ int setup_namespace(
                 /* Second round, flip the ro bits if necessary. */
                 for (m = mounts; m < mounts + n_mounts; ++m) {
                         r = make_read_only(m, blacklist, proc_self_mountinfo);
-                        if (r < 0)
+                        if (r < 0) {
+                                if (error_path && mount_entry_path(m))
+                                        *error_path = strdup(mount_entry_path(m));
                                 goto finish;
+                        }
                 }
         }
 
@@ -1618,6 +1631,44 @@ int temporary_filesystem_add(
         return 0;
 }
 
+static int make_tmp_prefix(const char *prefix) {
+        _cleanup_free_ char *t = NULL;
+        int r;
+
+        /* Don't do anything unless we know the dir is actually missing */
+        r = access(prefix, F_OK);
+        if (r >= 0)
+                return 0;
+        if (errno != ENOENT)
+                return -errno;
+
+        r = mkdir_parents(prefix, 0755);
+        if (r < 0)
+                return r;
+
+        r = tempfn_random(prefix, NULL, &t);
+        if (r < 0)
+                return r;
+
+        if (mkdir(t, 0777) < 0)
+                return -errno;
+
+        if (chmod(t, 01777) < 0) {
+                r = -errno;
+                (void) rmdir(t);
+                return r;
+        }
+
+        if (rename(t, prefix) < 0) {
+                r = -errno;
+                (void) rmdir(t);
+                return r == -EEXIST ? 0 : r; /* it's fine if someone else created the dir by now */
+        }
+
+        return 0;
+
+}
+
 static int setup_one_tmp_dir(const char *id, const char *prefix, char **path) {
         _cleanup_free_ char *x = NULL;
         char bid[SD_ID128_STRING_MAX];
@@ -1638,6 +1689,10 @@ static int setup_one_tmp_dir(const char *id, const char *prefix, char **path) {
         x = strjoin(prefix, "/systemd-private-", sd_id128_to_string(boot_id, bid), "-", id, "-XXXXXX");
         if (!x)
                 return -ENOMEM;
+
+        r = make_tmp_prefix(prefix);
+        if (r < 0)
+                return r;
 
         RUN_WITH_UMASK(0077)
                 if (!mkdtemp(x))
@@ -1687,7 +1742,7 @@ int setup_tmp_dirs(const char *id, char **tmp_dir, char **var_tmp_dir) {
         return 0;
 }
 
-int setup_netns(int netns_storage_socket[static 2]) {
+int setup_netns(const int netns_storage_socket[static 2]) {
         _cleanup_close_ int netns = -1;
         int r, q;
 
@@ -1750,7 +1805,7 @@ fail:
         return r;
 }
 
-int open_netns_path(int netns_storage_socket[static 2], const char *path) {
+int open_netns_path(const int netns_storage_socket[static 2], const char *path) {
         _cleanup_close_ int netns = -1;
         int q, r;
 

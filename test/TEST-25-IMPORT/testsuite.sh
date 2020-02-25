@@ -1,6 +1,4 @@
 #!/bin/bash
-# -*- mode: shell-script; indent-tabs-mode: nil; sh-basic-offset: 4; -*-
-# ex: ts=8 sw=4 sts=4 et filetype=sh
 set -ex
 set -o pipefail
 
@@ -120,6 +118,18 @@ diff -r /var/tmp/scratch/ /var/lib/machines/scratch4
 machinectl remove scratch4
 ! test -f /var/lib/machines/scratch4
 ! machinectl image-status scratch4
+
+# Test import-tar hypen/stdin pipe behavior
+cat /var/tmp/scratch.tar.gz | machinectl import-tar - scratch5
+test -d /var/lib/machines/scratch5
+machinectl image-status scratch5
+diff -r /var/tmp/scratch/ /var/lib/machines/scratch5
+
+# Test export-tar hypen/stdout pipe behavior
+mkdir -p /var/tmp/extract
+machinectl export-tar scratch5 - | tar xvf - -C /var/tmp/extract/
+diff -r /var/tmp/scratch/ /var/tmp/extract/
+rm -rf /var/tmp/extract
 
 rm -rf /var/tmp/scratch
 

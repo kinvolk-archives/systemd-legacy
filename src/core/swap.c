@@ -43,6 +43,7 @@ static const UnitActiveState state_translation_table[_SWAP_STATE_MAX] = {
 
 static int swap_dispatch_timer(sd_event_source *source, usec_t usec, void *userdata);
 static int swap_dispatch_io(sd_event_source *source, int fd, uint32_t revents, void *userdata);
+static int swap_process_proc_swaps(Manager *m);
 
 static bool SWAP_STATE_WITH_PROCESS(SwapState state) {
         return IN_SET(state,
@@ -114,7 +115,8 @@ static void swap_init(Unit *u) {
         s->exec_context.std_output = u->manager->default_std_output;
         s->exec_context.std_error = u->manager->default_std_error;
 
-        s->parameters_proc_swaps.priority = s->parameters_fragment.priority = -1;
+        s->parameters_proc_swaps.priority = s->parameters_fragment.priority = 0;
+        s->parameters_fragment.priority_set = false;
 
         s->control_command_id = _SWAP_EXEC_COMMAND_INVALID;
 
@@ -434,6 +436,7 @@ static int swap_setup_unit(
         SWAP(u)->from_proc_swaps = true;
 
         p->priority = priority;
+        p->priority_set = true;
 
         unit_add_to_dbus_queue(u);
         return 0;
@@ -682,7 +685,7 @@ static void swap_enter_dead(Swap *s, SwapResult f) {
 
         s->exec_runtime = exec_runtime_unref(s->exec_runtime, true);
 
-        exec_context_destroy_runtime_directory(&s->exec_context, UNIT(s)->manager->prefix[EXEC_DIRECTORY_RUNTIME]);
+        unit_destroy_runtime_directory(UNIT(s), &s->exec_context);
 
         unit_unref_uid_gid(UNIT(s), true);
 
@@ -755,15 +758,15 @@ static void swap_enter_activating(Swap *s) {
         s->control_command = s->exec_command + SWAP_EXEC_ACTIVATE;
 
         if (s->from_fragment) {
-                int priority = -1;
+                int priority = 0;
 
                 r = fstab_find_pri(s->parameters_fragment.options, &priority);
                 if (r < 0)
                         log_warning_errno(r, "Failed to parse swap priority \"%s\", ignoring: %m", s->parameters_fragment.options);
-                else if (r == 1 && s->parameters_fragment.priority >= 0)
+                else if (r == 1 && s->parameters_fragment.priority_set)
                         log_warning("Duplicate swap priority configuration by Priority and Options fields.");
 
-                if (r <= 0 && s->parameters_fragment.priority >= 0) {
+                if (r <= 0 && s->parameters_fragment.priority_set) {
                         if (s->parameters_fragment.options)
                                 r = asprintf(&opts, "%s,pri=%i", s->parameters_fragment.options, s->parameters_fragment.priority);
                         else
@@ -1014,6 +1017,10 @@ static void swap_sigchld_event(Unit *u, pid_t pid, int code, int status) {
         if (pid != s->control_pid)
                 return;
 
+        /* Let's scan /proc/swaps before we process SIGCHLD. For the reasoning see the similar code in
+         * mount.c */
+        (void) swap_process_proc_swaps(u->manager);
+
         s->control_pid = 0;
 
         if (is_clean_exit(code, status, EXIT_CLEAN_COMMAND, NULL))
@@ -1038,9 +1045,10 @@ static void swap_sigchld_event(Unit *u, pid_t pid, int code, int status) {
         }
 
         unit_log_process_exit(
-                        u, f == SWAP_SUCCESS ? LOG_DEBUG : LOG_NOTICE,
+                        u,
                         "Swap process",
                         swap_exec_command_to_string(s->control_command_id),
+                        f == SWAP_SUCCESS,
                         code, status);
 
         switch (s->state) {
@@ -1149,13 +1157,11 @@ static int swap_load_proc_swaps(Manager *m, bool set_flags) {
         return 0;
 }
 
-static int swap_dispatch_io(sd_event_source *source, int fd, uint32_t revents, void *userdata) {
-        Manager *m = userdata;
+static int swap_process_proc_swaps(Manager *m) {
         Unit *u;
         int r;
 
         assert(m);
-        assert(revents & EPOLLPRI);
 
         r = swap_load_proc_swaps(m, true);
         if (r < 0) {
@@ -1228,6 +1234,15 @@ static int swap_dispatch_io(sd_event_source *source, int fd, uint32_t revents, v
         }
 
         return 1;
+}
+
+static int swap_dispatch_io(sd_event_source *source, int fd, uint32_t revents, void *userdata) {
+        Manager *m = userdata;
+
+        assert(m);
+        assert(revents & EPOLLPRI);
+
+        return swap_process_proc_swaps(m);
 }
 
 static Unit *swap_following(Unit *u) {
@@ -1515,6 +1530,8 @@ const UnitVTable swap_vtable = {
 
         .active_state = swap_active_state,
         .sub_state_to_string = swap_sub_state_to_string,
+
+        .will_restart = unit_will_restart_default,
 
         .may_gc = swap_may_gc,
 

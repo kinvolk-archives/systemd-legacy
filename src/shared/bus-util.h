@@ -9,8 +9,8 @@
 #include "sd-bus.h"
 #include "sd-event.h"
 
-#include "hashmap.h"
 #include "macro.h"
+#include "set.h"
 #include "string-util.h"
 #include "time-util.h"
 
@@ -51,11 +51,6 @@ int bus_event_loop_with_idle(sd_event *e, sd_bus *bus, const char *name, usec_t 
 int bus_name_has_owner(sd_bus *c, const char *name, sd_bus_error *error);
 
 int bus_check_peercred(sd_bus *c);
-
-int bus_test_polkit(sd_bus_message *call, int capability, const char *action, const char **details, uid_t good_user, bool *_challenge, sd_bus_error *e);
-
-int bus_verify_polkit_async(sd_bus_message *call, int capability, const char *action, const char **details, bool interactive, uid_t good_user, Hashmap **registry, sd_bus_error *error);
-void bus_verify_polkit_async_registry_free(Hashmap *registry);
 
 int bus_connect_system_systemd(sd_bus **_bus);
 int bus_connect_user_systemd(sd_bus **_bus);
@@ -114,8 +109,11 @@ assert_cc(sizeof(pid_t) == sizeof(uint32_t));
 assert_cc(sizeof(mode_t) == sizeof(uint32_t));
 #define bus_property_get_mode ((sd_bus_property_get_t) NULL)
 
-int bus_log_parse_error(int r);
-int bus_log_create_error(int r);
+#define bus_log_parse_error(r) \
+        log_error_errno(r, "Failed to parse bus message: %m")
+
+#define bus_log_create_error(r) \
+        log_error_errno(r, "Failed to create bus message: %m")
 
 #define BUS_DEFINE_PROPERTY_GET_GLOBAL(function, bus_type, val)         \
         int function(sd_bus *bus,                                       \
@@ -179,3 +177,5 @@ static inline int bus_open_system_watch_bind(sd_bus **ret) {
 }
 
 int bus_reply_pair_array(sd_bus_message *m, char **l);
+
+extern const struct hash_ops bus_message_hash_ops;

@@ -152,6 +152,10 @@ static int automount_add_default_dependencies(Automount *a) {
         if (!MANAGER_IS_SYSTEM(UNIT(a)->manager))
                 return 0;
 
+        r = unit_add_dependency_by_name(UNIT(a), UNIT_AFTER, SPECIAL_LOCAL_FS_PRE_TARGET, true, UNIT_DEPENDENCY_DEFAULT);
+        if (r < 0)
+                return r;
+
         r = unit_add_two_dependencies_by_name(UNIT(a), UNIT_BEFORE, UNIT_CONFLICTS, SPECIAL_UMOUNT_TARGET, true, UNIT_DEPENDENCY_DEFAULT);
         if (r < 0)
                 return r;
@@ -568,7 +572,7 @@ static void automount_enter_waiting(Automount *a) {
         if (r < 0)
                 goto fail;
 
-        (void) mkdir_p_label(a->where, 0555);
+        (void) mkdir_p_label(a->where, a->directory_mode);
 
         unit_warn_if_dir_nonempty(UNIT(a), a->where);
 

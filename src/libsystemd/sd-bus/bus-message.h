@@ -128,6 +128,8 @@ struct sd_bus_message {
 
         size_t header_offsets[_BUS_MESSAGE_HEADER_MAX];
         unsigned n_header_offsets;
+
+        uint64_t read_counter;
 };
 
 static inline bool BUS_MESSAGE_NEED_BSWAP(sd_bus_message *m) {
@@ -223,3 +225,4 @@ void bus_message_set_sender_local(sd_bus *bus, sd_bus_message *m);
 
 sd_bus_message* bus_message_ref_queued(sd_bus_message *m, sd_bus *bus);
 sd_bus_message* bus_message_unref_queued(sd_bus_message *m, sd_bus *bus);
+int sd_bus_enqueue_for_read(sd_bus *bus, sd_bus_message *m);
