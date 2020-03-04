@@ -674,7 +674,7 @@ global:
 
 LIBSYSTEMD_241 {
 global:
-        sd_bus_enqueue_for_read;
+        sd_bus_enqeue_for_read;
         sd_event_source_disable_unref;
         sd_bus_close_unref;
 } LIBSYSTEMD_240;
