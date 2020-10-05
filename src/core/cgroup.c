@@ -1385,8 +1385,11 @@ static bool unit_get_needs_bpf_firewall(Unit *u) {
             c->ip_address_allow ||
             c->ip_address_deny ||
             c->ip_filters_ingress ||
-            c->ip_filters_egress)
+            c->ip_filters_egress) {
+                if (u->yell_on_bpf > 0)
+                        log_debug("Unit %s requires BPF/CGroup firewall.", u->id);
                 return true;
+        }
 
         /* If any parent slice has an IP access list defined, it applies too */
         for (p = UNIT_DEREF(u->slice); p; p = UNIT_DEREF(p->slice)) {
@@ -1395,8 +1398,11 @@ static bool unit_get_needs_bpf_firewall(Unit *u) {
                         return false;
 
                 if (c->ip_address_allow ||
-                    c->ip_address_deny)
+                    c->ip_address_deny) {
+                        if (u->yell_on_bpf > 0)
+                                log_debug("Unit %s through parent %s requires BPF/CGroup firewall.", u->id, p->id);
                         return true;
+                }
         }
 
         return false;
@@ -1500,7 +1506,7 @@ CGroupMask unit_get_members_mask(Unit *u) {
 
         /* Returns the mask of controllers all of the unit's children require, merged */
 
-        if (u->cgroup_members_mask_valid)
+        if (u->cgroup_members_mask_valid && u->yell_on_bpf == 0)
                 return u->cgroup_members_mask; /* Use cached value if possible */
 
         u->cgroup_members_mask = 0;
@@ -1511,8 +1517,13 @@ CGroupMask unit_get_members_mask(Unit *u) {
                 Iterator i;
 
                 HASHMAP_FOREACH_KEY(v, member, u->dependencies[UNIT_BEFORE], i)
-                        if (UNIT_DEREF(member->slice) == u)
+                        if (UNIT_DEREF(member->slice) == u) {
+                                if (u->yell_on_bpf > 0)
+                                        member->yell_on_bpf++;
                                 u->cgroup_members_mask |= unit_get_subtree_mask(member); /* note that this calls ourselves again, for the children */
+                                if (u->yell_on_bpf > 0)
+                                        member->yell_on_bpf--;
+                        }
         }
 
         u->cgroup_members_mask_valid = true;
@@ -1526,8 +1537,15 @@ CGroupMask unit_get_siblings_mask(Unit *u) {
          * require, i.e. the members mask of the unit's parent slice
          * if there is one. */
 
-        if (UNIT_ISSET(u->slice))
-                return unit_get_members_mask(UNIT_DEREF(u->slice));
+        if (UNIT_ISSET(u->slice)) {
+                CGroupMask mask;
+                if (u->yell_on_bpf > 0)
+                        UNIT_DEREF(u->slice)->yell_on_bpf++;
+                mask = unit_get_members_mask(UNIT_DEREF(u->slice));
+                if (u->yell_on_bpf > 0)
+                        UNIT_DEREF(u->slice)->yell_on_bpf--;
+                return mask;
+        }
 
         return unit_get_subtree_mask(u); /* we are the top-level slice */
 }
@@ -1575,7 +1593,12 @@ CGroupMask unit_get_target_mask(Unit *u) {
          * hierarchy, where we need to duplicate each cgroup in each
          * hierarchy that shall be enabled for it. */
 
+        u->yell_on_bpf++;
+        log_debug("checking bpf firewall mask on %s and its members and siblings", u->id);
         mask = unit_get_own_mask(u) | unit_get_members_mask(u) | unit_get_siblings_mask(u);
+        log_debug("CGROUP_MASK_BPF_FIREWALL in mask of %s: %s", u->id, ((mask & CGROUP_MASK_BPF_FIREWALL) ? "true" : "false"));
+        log_debug("CGROUP_MASK_BPF_FIREWALL in manager->cgroup_supported: %s", ((u->manager->cgroup_supported & CGROUP_MASK_BPF_FIREWALL) ? "true" : "false"));
+        u->yell_on_bpf--;
 
         if (mask & CGROUP_MASK_BPF_FIREWALL & ~u->manager->cgroup_supported)
                 emit_bpf_firewall_warning(u);
