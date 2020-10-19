@@ -33,11 +33,11 @@
 #include "path-util.h"
 #include "set.h"
 #include "signal-util.h"
+#include "stat-util.h"
 #include "strv.h"
 #include "sysctl-util.h"
 #include "tmpfile-util.h"
 #include "udev-util.h"
-#include "virt.h"
 
 /* use 128 MB for receive socket kernel queue. */
 #define RCVBUF_SIZE    (128*1024*1024)
@@ -249,10 +249,9 @@ static int manager_udev_process_link(sd_device_monitor *monitor, sd_device *devi
 static int manager_connect_udev(Manager *m) {
         int r;
 
-        /* udev does not initialize devices inside containers,
-         * so we rely on them being already initialized before
-         * entering the container */
-        if (detect_container() > 0)
+        /* udev does not initialize devices inside containers, so we rely on them being already
+         * initialized before entering the container. */
+        if (path_is_read_only_fs("/sys") > 0)
                 return 0;
 
         r = sd_device_monitor_new(&m->device_monitor);
@@ -1328,7 +1327,7 @@ static int manager_connect_genl(Manager *m) {
 
         r = sd_netlink_inc_rcvbuf(m->genl, RCVBUF_SIZE);
         if (r < 0)
-                return r;
+                log_warning_errno(r, "Failed to increase receive buffer size for general netlink socket, ignoring: %m");
 
         r = sd_netlink_attach_event(m->genl, m->event, 0);
         if (r < 0)
@@ -1352,7 +1351,7 @@ static int manager_connect_rtnl(Manager *m) {
 
         r = sd_netlink_inc_rcvbuf(m->rtnl, RCVBUF_SIZE);
         if (r < 0)
-                return r;
+                log_warning_errno(r, "Failed to increase receive buffer size for rtnl socket, ignoring: %m");
 
         r = sd_netlink_attach_event(m->rtnl, m->event, 0);
         if (r < 0)
